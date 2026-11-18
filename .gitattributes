@@ -1,0 +1,7 @@
+* text=auto
+# Windows-only files keep CRLF line endings on every checkout
+*.bat text eol=crlf
+*.iss text eol=crlf
+*.isl text eol=crlf
+build/*.txt text eol=crlf
+*.png binary

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>随堂字幕 悬浮字幕</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  :root { --fs: 26px; --ov-bg: #0c0e12; --ov-trans: #ffffff; }
+  html, body { overflow: hidden; background: transparent; }
+  body { padding: 8px; display: flex; align-items: flex-end; height: 100vh; }
+
+  /* desktop app: the window itself is the panel (rounded + semi-opaque by Windows) */
+  body.app { padding: 0; background: var(--ov-bg); }
+  body.app .panel { border-radius: 0; box-shadow: none; background: transparent; height: 100vh;
+                    display: flex; flex-direction: column; justify-content: flex-end; padding: 8px 24px 14px; overflow: hidden; }
+
+  /* browser preview (?demo): something that looks like a Zoom call behind a floating panel */
+  body.demo { background: #1b1d22; padding: 0 0 26px; }
+  .zoom { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px 14px 120px; z-index: -1; }
+  .zoom div { border-radius: 10px; background: linear-gradient(135deg, #2a3a4f, #3c4a3a); position: relative; overflow: hidden; }
+  .zoom div:nth-child(2) { background: linear-gradient(135deg, #4a3a46, #2c3f52); }
+  .zoom div::before { content: ""; position: absolute; width: 34%; aspect-ratio: 1; border-radius: 50%; background: rgba(255,255,255,.12); left: 33%; top: 18%; }
+  .zoom div span { position: absolute; left: 10px; bottom: 8px; font-size: 12px; color: #fff; background: rgba(0,0,0,.5); padding: 2px 6px; border-radius: 4px; }
+  body.demo .panel { width: min(1000px, calc(100% - 40px)); margin: 0 auto; }
+
+  .panel {
+    width: 100%; position: relative; border-radius: 16px; padding: 14px 24px 16px;
+    background: rgba(12, 14, 18, .88); color: #fff;
+    box-shadow: 0 10px 40px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.07);
+  }
+  .line + .line { margin-top: 10px; }
+  /* the previous sentence stays fully bright, just a little smaller */
+  .line.old .orig { font-size: calc(var(--fs) * .78); }
+  .line.old .tr { font-size: calc(var(--fs) * .66); }
+  .who { font-size: 11px; display: block; margin-bottom: 1px; }
+  .who.other { color: #5ee0d4; }
+  .who.me { color: #9be27b; }
+  .orig { font-size: var(--fs); font-weight: 600; line-height: 1.35; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+  .tr { font-size: calc(var(--fs) * .8); font-weight: 500; line-height: 1.4; color: var(--ov-trans); margin-top: 2px; }
+  .tent { color: rgba(255,255,255,.55); }
+  .tr.pending { font-size: calc(var(--fs) * .62); }
+  body.no-tr .tr { display: none; }
+  .idle { color: rgba(255,255,255,.45); font-size: 15px; }
+
+  /* corner controls: part of the panel (no box of their own), faint until hovered */
+  .tools {
+    position: absolute; top: 6px; right: 8px; display: flex; gap: 2px; z-index: 2;
+    opacity: 0; transition: opacity .2s;
+  }
+  body:hover .tools, .tools:focus-within { opacity: 1; }
+  body.locked .tools { display: none; }  /* click-through: it can't be clicked anyway */
+  .tools button {
+    border: 0; background: none; color: rgba(255,255,255,.45); font-size: 12px; line-height: 1;
+    padding: 5px 7px; border-radius: 6px;
+  }
+  .tools button:hover { color: #fff; background: rgba(255,255,255,.08); }
+  .tools button.on { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="panel pywebview-drag-region" id="panel">
+  <div class="tools">
+    <button id="smaller" title="缩小字号">A−</button>
+    <button id="bigger" title="放大字号">A+</button>
+    <button id="trBtn" class="on" title="显示译文">译文</button>
+    <button id="lock" title="鼠标穿透：点击会落到下面的窗口">穿透</button>
+    <button id="close" title="隐藏悬浮字幕">✕</button>
+  </div>
+  <div id="lines"><div class="idle">等待说话…</div></div>
+</div>
+<script>
+  setTimeout(() => {
+    if (!window.__lcReady) document.getElementById("lines").innerHTML =
+      '<div class="idle">脚本没有加载：请用 ui.bat 启动，或打开 http://localhost:17860/overlay.html?demo</div>';
+  }, 1500);
+</script>
+<script type="module" src="overlay.js"></script>
+</body>
+</html>

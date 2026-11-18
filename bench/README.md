@@ -1,0 +1,70 @@
+# bench/
+
+Benchmarks and experiments behind Mitschrift Live's design choices. They are working scripts,
+not a polished suite: each one answers one question and prints (or saves) its numbers.
+
+Install the extra tools first:
+
+```bash
+uv sync --extra cuda --group bench
+```
+
+(Use the runtime extra that fits your machine; `dml_test.py` needs `--extra dml`,
+the NPU scripts `--extra npu`.)
+
+## Test audio
+
+The test speech is synthetic (Microsoft Edge TTS) and not stored in the repository. Make it with:
+
+```bash
+uv run python bench/make_samples.py bench/audio
+```
+
+```bash
+uv run python bench/make_samples.py bench/audio_calib calib
+```
+
+```bash
+uv run python bench/make_samples.py bench/audio_zh zh
+```
+
+`make_echo_test.py` builds the speaker-echo scenario (`bench/audio_echo`), `codeswitch_probe.py make`
+the mixed-language clips, and `mixed_eval.py` writes `bench/results/mixed.wav` (German / Chinese /
+English alternating), which `backend_test.py` and other end-to-end checks replay.
+
+## Speech recognition speed and accuracy
+
+| Script | Question |
+|---|---|
+| `parakeet_bench.py` | Latency, WER, memory and a two-stream real-time simulation for Parakeet on CUDA / CPU (fp32 / int8). Shared helpers for the other scripts. |
+| `npu_test.py` | The same on an Intel NPU or iGPU through OpenVINO, with one static input window. |
+| `npu_quantize.py` | Builds int8 OpenVINO encoders (weights-only and full post-training quantization, calibrated on `bench/audio_calib`). |
+| `npu_breakdown.py` | Where the time goes on the NPU path: preprocessing, encoder, decoder. |
+| `to_fp16.py` | Converts the fp32 encoder to fp16 for DirectML (keeps the length arithmetic in fp32). |
+| `dml_test.py` | Parakeet's encoder on any DirectML GPU: fp16 vs int8, dynamic length vs padded window. |
+| `slow_cpu_eval.py` | Simulates a weaker PC (few CPU threads) and checks that live captions keep up. |
+| `summarize.py` | Prints one comparison table from `bench/results/*.json`. |
+
+## Pipeline behaviour
+
+| Script | Question |
+|---|---|
+| `replay_eval.py` | Test clips through the full live pipeline (VAD, segmenter, recognition): WER and latency. |
+| `mixed_eval.py` | Alternating German / Chinese / English: is every utterance routed to the right model? |
+| `lid_eval.py` | How well SenseVoice's language tag separates Chinese from German / English. |
+| `codeswitch_probe.py` | What happens to German words inside Chinese sentences. |
+| `echo_eval.py` | The speaker-echo scenario with echo handling off / on. |
+| `translate_eval.py` | Latency, quality and token use of the translation backends (makes real API calls). |
+
+## Desktop app checks
+
+| Script | Question |
+|---|---|
+| `backend_test.py` | The backend end to end over its WebSocket, no window: replay, live target switch, token check. |
+| `record_follow_test.py` | Recording during a replay, and restarting when the Windows default device changes. |
+| `live_diag.py` | The command-line version with a status line every 2 s and crash reports (for hangs). |
+| `transparency_probe.py` | Which way, if any, makes a WebView2 window see-through (none did: hence the native caption bar). |
+| `window_probe.py` | Window styles, geometry and a screenshot of the running app, from outside. |
+
+Results land in `bench/results/`. The JSON files from the development machine (Intel Core Ultra 9
+275HX, RTX 5080 Laptop) are committed; audio, logs and screenshots are not.

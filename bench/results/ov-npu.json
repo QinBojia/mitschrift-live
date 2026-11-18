@@ -1,0 +1,73 @@
+{
+  "tag": "ov-npu",
+  "openvino": "2026.4.1-22982-e213a147257-releases/2026/4",
+  "windows_s": [
+    3.0,
+    6.0,
+    10.0
+  ],
+  "compile_s": {
+    "3.0": 35.2,
+    "6.0": 37.1,
+    "10.0": 2.4
+  },
+  "encoder_load_s": 76.6,
+  "rss_mib": 7529,
+  "accuracy": {
+    "de": {
+      "wer": 0.0366,
+      "text": "Guten Morgen zusammen, danke, dass ihr euch heute Zeit genommen habt. Wir wollen zuerst kurz auf die Ergebnisse des letzten Quartals schauen und danach über die Planung. für das nächste Jahr sprechen. Der Umsatz ist im Vergleich zum Vorjahr um ungefähr 12% gestiegen, allerdings sind auch die Kosten für die Logistik deutlich höher als ursprünglich erwartet hatten. Ich würde vorschlagen, dass Frau Schneider die Zahlen im Detail vorstellt, bevor wir in die Diskussion einsteigen. Gibt es Dazu Fragen oder Einwände."
+    },
+    "en": {
+      "wer": 0.0114,
+      "text": "Thanks everyone for joining. Before we dive into the roadmap, I want to quickly recap where we landed last week. The prototype is working end-to-end, but latency is so still higher than we would like, especially when the network is unstable. Our plan is to move the speech recognition onto the local GPU and keep only the translation step in the cloud. If that works, we should be able to bring the delay down to around one or two seconds. Does anyone have concerns about that approach?"
+    }
+  },
+  "latency": [
+    {
+      "seconds": 1,
+      "first_ms": 89,
+      "median_ms": 118,
+      "p90_ms": 123,
+      "rtf": 0.118
+    },
+    {
+      "seconds": 2,
+      "first_ms": 129,
+      "median_ms": 113,
+      "p90_ms": 135,
+      "rtf": 0.0565
+    },
+    {
+      "seconds": 5,
+      "first_ms": 219,
+      "median_ms": 201,
+      "p90_ms": 206,
+      "rtf": 0.0402
+    },
+    {
+      "seconds": 10,
+      "first_ms": 252,
+      "median_ms": 353,
+      "p90_ms": 392,
+      "rtf": 0.0353
+    }
+  ],
+  "realtime": {
+    "streams": 2,
+    "hop_s": 0.5,
+    "max_utt_s": 10.0,
+    "calls": 240,
+    "duty_cycle": 0.696,
+    "late_ticks": 28,
+    "ticks": 120,
+    "lat_median_ms": 168,
+    "lat_p95_ms": 346,
+    "proc_cpu_pct_of_machine": 1.9,
+    "rss_mib": 7619,
+    "vram_max_mib": 4880,
+    "gpu_util_mean": 4.1,
+    "gpu_util_max": 24,
+    "power_mean_w": 29.6
+  }
+}

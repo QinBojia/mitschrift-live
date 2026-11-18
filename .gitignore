@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# local tooling
+.claude/
+
+# built installers and release folders (huge, and private builds embed an API key)
+安装包/
+dist/
+*.exe
+
+# benchmark data: generated speech (bench/make_samples.py), real recordings, screenshots
+bench/audio*/
+bench/recordings/
+bench/results/*.wav
+bench/results/*.png
+bench/results/*.log
+
+# models are downloaded at runtime into ~/.livecapture/models
+*.onnx
+*.onnx.data
+*.bin
+*.blob

@@ -1,0 +1,108 @@
+/* Mitschrift Live (随堂字幕) UI - shared tokens and components */
+:root {
+  --bg: #111318;
+  --bg-elev: #191c23;
+  --bg-hover: #20242d;
+  --line: #2a2f3a;
+  --text: #e9ecf2;
+  --text-2: #a4abb9;
+  --text-3: #6d7586;
+  --accent: #6ea8ff;
+  --other: #4fd1c5;
+  --me: #8bd36b;
+  --warn: #ffb547;
+  --err: #ff6b6b;
+  --tr: #ffffff;
+  --trans: #ffffff;
+  --bubble-other: #1c2029;
+  --bubble-me: #1d2a1f;
+  --bubble-me-line: #2f4a2c;
+  --radius: 12px;
+  --font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f5f6f8;
+    --bg-elev: #ffffff;
+    --bg-hover: #eef0f4;
+    --line: #e1e4ea;
+    --text: #15181e;
+    --text-2: #4f5665;
+    --text-3: #8a91a0;
+    --accent: #2f6fe0;
+    --other: #0f9488;
+    --me: #3f8f1f;
+    --tr: #0b0d12;
+    --trans: #15181e;
+    --bubble-other: #ffffff;
+    --bubble-me: #e7f5dd;
+    --bubble-me-line: #c9e6b3;
+    color-scheme: light;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+button:hover { background: var(--bg-hover); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.icon { padding: 6px 8px; line-height: 1; }
+input, select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  outline: none;
+}
+input:focus, select:focus { border-color: var(--accent); }
+
+/* segmented control */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; padding: 2px; gap: 2px; }
+.seg button { border: 0; border-radius: 7px; padding: 4px 12px; color: var(--text-2); }
+.seg button.on { background: var(--bg-hover); color: var(--text); font-weight: 600; }
+
+/* speaker / language tags */
+.who { font-weight: 700; font-size: 12px; letter-spacing: .02em; }
+.who.other { color: var(--other); }
+.who.me { color: var(--me); }
+.lang {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+  color: var(--text-3); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px;
+}
+
+/* level meter */
+.meter { width: 64px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.meter > i { display: block; height: 100%; width: 0; border-radius: 3px; transition: width .08s linear; }
+.meter.other > i { background: var(--other); }
+.meter.me > i { background: var(--me); }
+
+/* "translating..." shimmer */
+.pending {
+  color: var(--text-3);
+  background: linear-gradient(90deg, var(--text-3) 0%, var(--text) 50%, var(--text-3) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  animation: shimmer 1.4s linear infinite;
+}
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.caret::after { content: "▍"; color: var(--accent); animation: blink 1s steps(1) infinite; margin-left: 1px; }
+@keyframes blink { 50% { opacity: 0; } }
+.tent { color: var(--text-3); }

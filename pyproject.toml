@@ -1,0 +1,45 @@
+[project]
+name = "mitschrift-live"
+version = "0.1.5"  # keep in step with livecapture/__init__.py
+description = "Real-time captions and translation on Windows: system audio + microphone, local speech recognition, LLM translation"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = [
+    "onnx-asr[hub]>=0.12",
+    "numpy",
+    "soundfile",
+    "soxr",
+    "pyaudiowpatch",
+    "rich",
+    "huggingface-hub",
+    "livekit",
+    "pywebview",
+    "pystray",
+    "pillow",
+    "pycaw",
+    "websockets",
+    "anthropic",
+    "openai",
+    "kaldi-native-fbank",
+]
+
+[project.optional-dependencies]
+# Speech runtime: pick exactly one of cpu / cuda / dml (all three install the `onnxruntime`
+# module). npu is an add-on for Intel Core Ultra NPUs and goes with cpu or cuda.
+cpu = ["onnxruntime>=1.32"]
+cuda = ["onnxruntime-gpu[cuda,cudnn]>=1.32", "nvidia-ml-py"]  # NVIDIA GPU
+dml = ["onnxruntime-directml>=1.24"]  # AMD / Intel integrated graphics via DirectML
+npu = ["openvino>=2026.4"]
+
+[dependency-groups]
+dev = ["pytest"]
+bench = ["nncf", "edge-tts", "psutil", "onnx", "onnxconverter-common"]
+
+[tool.uv]
+conflicts = [[{ extra = "cpu" }, { extra = "cuda" }, { extra = "dml" }]]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"

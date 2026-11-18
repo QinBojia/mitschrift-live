@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>随堂字幕 Mitschrift Live</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-rows: auto auto 1fr auto; height: 100vh; overflow: hidden; }
+
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 12px 18px;
+    border-bottom: 1px solid var(--line); background: var(--bg-elev);
+  }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; margin-right: 6px; }
+  .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-3); }
+  .brand .dot.live { background: var(--err); box-shadow: 0 0 0 0 rgba(255,107,107,.6); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 70% { box-shadow: 0 0 0 8px rgba(255,107,107,0); } 100% { box-shadow: 0 0 0 0 rgba(255,107,107,0); } }
+  .spacer { flex: 1; }
+  .label { color: var(--text-3); font-size: 12px; }
+
+  .status {
+    display: flex; align-items: center; gap: 18px; padding: 8px 18px; font-size: 12px;
+    color: var(--text-2); border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .src { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .src .dev { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
+  .stats { margin-left: auto; display: flex; gap: 12px; color: var(--text-3); }
+  .stats b { color: var(--text-2); font-weight: 600; }
+  .error { color: var(--err); font-weight: 600; }
+
+  main { overflow-y: auto; padding: 8px 22px 40px; scroll-behavior: smooth; position: relative; }
+
+  /* chat layout: 对方 on the left, 我 on the right; consecutive lines of one speaker are grouped */
+  .entry { display: flex; flex-direction: column; align-items: flex-start; margin-top: 16px; }
+  .entry.me { align-items: flex-end; }
+  .entry.cont { margin-top: 5px; }
+  .entry.cont .meta { display: none; }
+  .meta { display: flex; gap: 7px; align-items: center; margin: 0 8px 5px; font-size: 11px; color: var(--text-3); }
+  .entry.me .meta { flex-direction: row-reverse; }
+  .meta .t { font-variant-numeric: tabular-nums; }
+  .bubble {
+    max-width: min(78%, 780px); padding: 9px 15px 11px; border-radius: 18px;
+    background: var(--bubble-other); border: 1px solid var(--line);
+    transition: border-color .2s, background .2s;
+  }
+  .entry.other .bubble { border-top-left-radius: 6px; }
+  .entry.me .bubble { background: var(--bubble-me); border-color: var(--bubble-me-line); border-top-right-radius: 6px; }
+  .entry.other.cont .bubble { border-top-left-radius: 18px; border-bottom-left-radius: 6px; }
+  .entry.me.cont .bubble { border-top-right-radius: 18px; border-bottom-right-radius: 6px; }
+  .entry.live .bubble { border-style: dashed; }
+  /* original first and larger; translation a bit smaller in a subtitle tint */
+  .orig { color: var(--text); font-size: 16.5px; line-height: 1.5; font-weight: 500; }
+  .trans { color: var(--trans); font-size: 15px; line-height: 1.5; font-weight: 500; margin-top: 3px; }
+  mark { background: color-mix(in srgb, var(--warn) 45%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+  .empty { color: var(--text-3); text-align: center; margin-top: 18vh; line-height: 1.9; }
+
+  #jump {
+    position: fixed; right: 26px; bottom: 74px; display: none; border-radius: 999px;
+    background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.35);
+  }
+
+  footer {
+    display: flex; gap: 10px; align-items: center; padding: 10px 18px;
+    border-top: 1px solid var(--line); background: var(--bg-elev);
+  }
+  footer input { flex: 1; max-width: 360px; }
+  footer .count { color: var(--text-3); font-size: 12px; margin-left: auto; }
+
+  /* settings drawer */
+  #drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; width: 360px; max-width: 100vw;
+    background: var(--bg-elev); border-left: 1px solid var(--line); padding: 18px 20px; overflow-y: auto;
+    transform: translateX(100%); transition: transform .22s ease; z-index: 10; box-shadow: -12px 0 30px rgba(0,0,0,.3);
+  }
+  #drawer.open { transform: none; }
+  #drawer h2 { font-size: 16px; margin: 0 0 14px; display: flex; justify-content: space-between; align-items: center; }
+  #drawer h3 { font-size: 12px; color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; margin: 20px 0 8px; }
+  .field { display: grid; gap: 6px; margin-bottom: 12px; }
+  .field > span { font-size: 12px; color: var(--text-2); }
+  .field select, .field input { width: 100%; }
+  .toggle { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 13px; }
+  .switch { width: 36px; height: 20px; border-radius: 10px; background: var(--line); position: relative; cursor: pointer; border: 0; padding: 0; }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .15s; }
+  .switch.on { background: var(--accent); }
+  .switch.on::after { left: 19px; }
+  .hint { font-size: 11.5px; color: var(--text-3); line-height: 1.5; margin-top: -4px; }
+  .boot {
+    position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 20; max-width: 520px;
+    background: var(--bg-elev); border: 1px solid var(--warn); border-radius: var(--radius);
+    padding: 18px 22px; line-height: 1.8; box-shadow: 0 12px 40px rgba(0,0,0,.4);
+  }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  #rec { color: var(--text-2); }
+  #rec.armed { color: var(--err); border-color: color-mix(in srgb, var(--err) 55%, var(--line)); }
+  #rec.live { color: #fff; background: var(--err); border-color: var(--err); animation: recpulse 1.6s infinite; }
+  @keyframes recpulse { 50% { background: color-mix(in srgb, var(--err) 70%, transparent); } }
+  .notice { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot" id="dot"></span>随堂字幕</div>
+  <button id="run" class="primary">开始</button>
+  <button id="rec" title="录音：保存双方的音频和字幕（含译文）到 文档\Mitschrift Live">● 录音</button>
+  <span class="spacer"></span>
+  <span class="label">译文</span>
+  <div class="seg" id="target" title="把对方和你说的话翻译成哪种语言；“关”= 只显示字幕">
+    <button data-v="zh">中文</button><button data-v="en">English</button><button data-v="de">Deutsch</button><button data-v="off">关</button>
+  </div>
+  <button id="overlayBtn" title="显示/隐藏悬浮字幕">悬浮字幕</button>
+  <button id="gear" class="icon" title="设置">⚙</button>
+</header>
+
+<div class="status">
+  <div class="src"><span class="who other">对方</span><div class="meter other"><i id="lv-other"></i></div><span class="dev" id="dev-other"></span></div>
+  <div class="src"><span class="who me">我</span><div class="meter me"><i id="lv-me"></i></div><span class="dev" id="dev-me"></span></div>
+  <div class="stats" id="stats"></div>
+</div>
+
+<main id="list">
+  <div class="empty" id="empty">还没有字幕。<br>点"开始"后，对方说的话和你自己说的话会出现在这里。</div>
+</main>
+<button id="jump">↓ 回到最新</button>
+
+<footer>
+  <input id="search" placeholder="搜索原文或译文…" spellcheck="false">
+  <button data-export="txt">导出 TXT</button>
+  <button data-export="srt">SRT</button>
+  <button data-export="md">Markdown</button>
+  <button id="openRec" hidden title="打开保存录音的文件夹">打开录音文件夹</button>
+  <span class="count" id="count"></span>
+</footer>
+
+<aside id="drawer">
+  <h2>设置 <button class="icon" id="closeDrawer">✕</button></h2>
+  <h3>音频</h3>
+  <label class="field"><span>对方（系统声音）</span><select id="set-speaker"><option>Windows 默认输出</option></select></label>
+  <label class="field"><span>我（麦克风）</span><select id="set-mic"><option>Windows 默认麦克风</option></select></label>
+  <div class="toggle">回声消除（外放时打开）<button class="switch on" data-k="aec"></button></div>
+  <h3>识别</h3>
+  <label class="field"><span>引擎</span>
+    <select id="set-engine"><option value="cuda">NVIDIA GPU（最快）</option><option value="npu">Intel NPU（省电）</option><option value="dml">核显 DirectML（AMD / Intel）</option><option value="cpu">CPU</option></select></label>
+  <div class="toggle">识别中文<button class="switch on" data-k="zh"></button></div>
+  <h3>翻译</h3>
+  <label class="field"><span>模型</span>
+    <select id="set-model"><option value="deepseek-flash">deepseek-flash（最快）</option><option value="claude-haiku-5-5">Claude Haiku 5.5</option><option value="claude-opus-5-5">Claude Opus 5.5（质量最好，较慢）</option></select></label>
+  <label class="field"><span>场景</span><input id="set-scene" value="a German language class"></label>
+  <p class="hint">场景会告诉翻译模型这是什么场合，影响用词和语气。</p>
+  <h3>关于</h3>
+  <p class="hint" id="about">随堂字幕 Mitschrift Live</p>
+  <p class="hint">
+    语音识别：NVIDIA Parakeet TDT 0.6B v3（CC BY 4.0，ONNX 版来自 istupakov/onnx-asr）·
+    中文识别：FunAudioLLM SenseVoice Small · 语音检测：Silero VAD（MIT）·
+    回声消除：WebRTC 音频处理（BSD，经 LiveKit）· 翻译：DeepSeek。
+    其余开源组件的许可证见安装目录下的 licenses 文件夹。
+  </p>
+  <h3>悬浮字幕</h3>
+  <label class="field"><span>字号</span><input id="set-font" type="range" min="16" max="48" value="26"></label>
+  <label class="field"><span>文字不透明度</span><input id="set-text-alpha" type="range" min="20" max="100" value="100"></label>
+  <label class="field"><span>背景不透明度</span><input id="set-bg-alpha" type="range" min="0" max="100" value="100"></label>
+  <p class="hint">背景调低后能透过字幕条看到 Zoom；鼠标移到字幕条上时会暂时显示背景，方便拖动。</p>
+  <div class="toggle"><span>鼠标穿透（点到下面的 Zoom）<span class="hk" id="hk"></span></span><button class="switch" data-k="clickThrough"></button></div>
+  <p class="hint" id="hk-hint">穿透开启后字幕条无法点击，可用全局快捷键或这里关闭。</p>
+</aside>
+
+<div id="boot" class="boot" hidden>
+  界面脚本没有加载。直接双击打开 HTML 文件时浏览器会拦截脚本。<br>
+  请用 <b>run.bat</b> 启动桌面版，或打开 <b>http://localhost:17860/main.html?demo</b> 看演示。
+</div>
+<script>
+  // module scripts are blocked on file:// - say so instead of leaving dead buttons
+  setTimeout(() => { if (!window.__lcReady) document.getElementById("boot").hidden = false; }, 1500);
+</script>
+<script type="module" src="main.js"></script>
+</body>
+</html>
