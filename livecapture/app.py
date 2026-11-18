@@ -33,6 +33,7 @@ LOG_FILE = logs.setup(models.APP_DIR, __version__, EDITION.name)
 import webview  # noqa: E402
 
 from .caption_bar import CaptionBar, demo_feed  # noqa: E402
+from .i18n import tr  # noqa: E402
 from .recorder import DEFAULT_DIR as RECORD_DIR  # noqa: E402
 from .server import Backend  # noqa: E402
 from .tray import Tray, save_app_icon  # noqa: E402
@@ -205,7 +206,7 @@ class DesktopApp:
             self._told_about_tray = True
             self.state["told_about_tray"] = True
             save_state(self.state)
-            self.tray.notify(f"{APP_NAME_ZH}还在托盘里运行。右键托盘图标可以退出。")
+            self.tray.notify(tr("tray.hint"))
         return False  # cancel the close
 
     def _on_main_closed(self) -> None:
@@ -246,7 +247,7 @@ class DesktopApp:
                 self.hotkey = name
                 break
         else:
-            print("全局快捷键全部被占用，鼠标穿透只能在主窗口设置里关闭", flush=True)
+            print("all global hotkeys are taken: click-through can only be turned off in the settings", flush=True)
             return
         # the page may still be loading; it also asks via get_hotkey()
         self._js(self.main, f"window.__setHotkey && window.__setHotkey({json.dumps(self.hotkey)})")

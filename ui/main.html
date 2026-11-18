@@ -96,77 +96,89 @@
   #rec.live { color: #fff; background: var(--err); border-color: var(--err); animation: recpulse 1.6s infinite; }
   @keyframes recpulse { 50% { background: color-mix(in srgb, var(--err) 70%, transparent); } }
   .notice { color: var(--accent); }
+  .keyrow { display: flex; gap: 6px; }
+  .keyrow input { flex: 1; min-width: 0; font-family: ui-monospace, Consolas, monospace; }
+  .keystatus { margin-top: -6px; margin-bottom: 12px; }
+  .keystatus.none { color: var(--warn); }
 </style>
 </head>
 <body>
 <header>
-  <div class="brand"><span class="dot" id="dot"></span>随堂字幕</div>
-  <button id="run" class="primary">开始</button>
-  <button id="rec" title="录音：保存双方的音频和字幕（含译文）到 文档\Mitschrift Live">● 录音</button>
+  <div class="brand"><span class="dot" id="dot"></span><span data-i18n="app">随堂字幕</span></div>
+  <button id="run" class="primary" data-i18n="run.start">开始</button>
+  <button id="rec" data-i18n="rec" data-i18n-title="rec.title">● 录音</button>
   <span class="spacer"></span>
-  <span class="label">译文</span>
-  <div class="seg" id="target" title="把对方和你说的话翻译成哪种语言；“关”= 只显示字幕">
-    <button data-v="zh">中文</button><button data-v="en">English</button><button data-v="de">Deutsch</button><button data-v="off">关</button>
+  <span class="label" data-i18n="target">译文</span>
+  <div class="seg" id="target" data-i18n-title="target.title">
+    <button data-v="zh">中文</button><button data-v="en">English</button><button data-v="de">Deutsch</button><button data-v="off" data-i18n="target.off">关</button>
   </div>
-  <button id="overlayBtn" title="显示/隐藏悬浮字幕">悬浮字幕</button>
-  <button id="gear" class="icon" title="设置">⚙</button>
+  <button id="overlayBtn" data-i18n="overlay" data-i18n-title="overlay.title">悬浮字幕</button>
+  <button id="gear" class="icon" data-i18n-title="settings">⚙</button>
 </header>
 
 <div class="status">
-  <div class="src"><span class="who other">对方</span><div class="meter other"><i id="lv-other"></i></div><span class="dev" id="dev-other"></span></div>
-  <div class="src"><span class="who me">我</span><div class="meter me"><i id="lv-me"></i></div><span class="dev" id="dev-me"></span></div>
+  <div class="src"><span class="who other" data-i18n="who.other">对方</span><div class="meter other"><i id="lv-other"></i></div><span class="dev" id="dev-other"></span></div>
+  <div class="src"><span class="who me" data-i18n="who.me">我</span><div class="meter me"><i id="lv-me"></i></div><span class="dev" id="dev-me"></span></div>
   <div class="stats" id="stats"></div>
 </div>
 
 <main id="list">
-  <div class="empty" id="empty">还没有字幕。<br>点"开始"后，对方说的话和你自己说的话会出现在这里。</div>
+  <div class="empty" id="empty" data-i18n-html="empty">还没有字幕。</div>
 </main>
-<button id="jump">↓ 回到最新</button>
+<button id="jump" data-i18n="jump">↓ 回到最新</button>
 
 <footer>
-  <input id="search" placeholder="搜索原文或译文…" spellcheck="false">
-  <button data-export="txt">导出 TXT</button>
+  <input id="search" data-i18n-ph="search" spellcheck="false">
+  <button data-export="txt" data-i18n="export.txt">导出 TXT</button>
   <button data-export="srt">SRT</button>
   <button data-export="md">Markdown</button>
-  <button id="openRec" hidden title="打开保存录音的文件夹">打开录音文件夹</button>
+  <button id="openRec" hidden data-i18n="openRec" data-i18n-title="openRec.title">打开录音文件夹</button>
   <span class="count" id="count"></span>
 </footer>
 
 <aside id="drawer">
-  <h2>设置 <button class="icon" id="closeDrawer">✕</button></h2>
-  <h3>音频</h3>
-  <label class="field"><span>对方（系统声音）</span><select id="set-speaker"><option>Windows 默认输出</option></select></label>
-  <label class="field"><span>我（麦克风）</span><select id="set-mic"><option>Windows 默认麦克风</option></select></label>
-  <div class="toggle">回声消除（外放时打开）<button class="switch on" data-k="aec"></button></div>
-  <h3>识别</h3>
-  <label class="field"><span>引擎</span>
-    <select id="set-engine"><option value="cuda">NVIDIA GPU（最快）</option><option value="npu">Intel NPU（省电）</option><option value="dml">核显 DirectML（AMD / Intel）</option><option value="cpu">CPU</option></select></label>
-  <div class="toggle">识别中文<button class="switch on" data-k="zh"></button></div>
-  <h3>翻译</h3>
-  <label class="field"><span>模型</span>
-    <select id="set-model"><option value="deepseek-flash">deepseek-flash（最快）</option><option value="claude-haiku-5-5">Claude Haiku 5.5</option><option value="claude-opus-5-5">Claude Opus 5.5（质量最好，较慢）</option></select></label>
-  <label class="field"><span>场景</span><input id="set-scene" value="a German language class"></label>
-  <p class="hint">场景会告诉翻译模型这是什么场合，影响用词和语气。</p>
-  <h3>关于</h3>
-  <p class="hint" id="about">随堂字幕 Mitschrift Live</p>
-  <p class="hint">
-    语音识别：NVIDIA Parakeet TDT 0.6B v3（CC BY 4.0，ONNX 版来自 istupakov/onnx-asr）·
-    中文识别：FunAudioLLM SenseVoice Small · 语音检测：Silero VAD（MIT）·
-    回声消除：WebRTC 音频处理（BSD，经 LiveKit）· 翻译：DeepSeek。
-    其余开源组件的许可证见安装目录下的 licenses 文件夹。
-  </p>
-  <h3>悬浮字幕</h3>
-  <label class="field"><span>字号</span><input id="set-font" type="range" min="16" max="48" value="26"></label>
-  <label class="field"><span>文字不透明度</span><input id="set-text-alpha" type="range" min="20" max="100" value="100"></label>
-  <label class="field"><span>背景不透明度</span><input id="set-bg-alpha" type="range" min="0" max="100" value="100"></label>
-  <p class="hint">背景调低后能透过字幕条看到 Zoom；鼠标移到字幕条上时会暂时显示背景，方便拖动。</p>
-  <div class="toggle"><span>鼠标穿透（点到下面的 Zoom）<span class="hk" id="hk"></span></span><button class="switch" data-k="clickThrough"></button></div>
-  <p class="hint" id="hk-hint">穿透开启后字幕条无法点击，可用全局快捷键或这里关闭。</p>
+  <h2><span data-i18n="settings">设置</span> <button class="icon" id="closeDrawer">✕</button></h2>
+  <h3 data-i18n="sec.ui">界面</h3>
+  <label class="field"><span data-i18n="ui.lang">界面语言</span>
+    <select id="set-ui_lang"><option value="auto" data-i18n="ui.auto">自动</option><option value="zh">中文</option><option value="en">English</option></select></label>
+  <h3 data-i18n="sec.audio">音频</h3>
+  <label class="field"><span data-i18n="dev.other">对方（系统声音）</span><select id="set-speaker"></select></label>
+  <label class="field"><span data-i18n="dev.me">我（麦克风）</span><select id="set-mic"></select></label>
+  <div class="toggle"><span data-i18n="aec">回声消除</span><button class="switch on" data-k="aec"></button></div>
+  <h3 data-i18n="sec.asr">识别</h3>
+  <label class="field"><span data-i18n="engine">引擎</span>
+    <select id="set-engine"><option value="cuda" data-i18n="engine.cuda"></option><option value="npu" data-i18n="engine.npu"></option><option value="dml" data-i18n="engine.dml"></option><option value="cpu" data-i18n="engine.cpu"></option></select></label>
+  <div class="toggle"><span data-i18n="zh">识别中文</span><button class="switch on" data-k="zh"></button></div>
+  <h3 data-i18n="sec.mt">翻译</h3>
+  <label class="field"><span data-i18n="model">模型</span>
+    <select id="set-model"><option value="deepseek-flash">deepseek-flash</option><option value="claude-haiku-5-5">Claude Haiku 5.5</option><option value="claude-opus-5-5">Claude Opus 5.5</option></select></label>
+  <div class="keybox" data-provider="deepseek">
+    <label class="field"><span data-i18n="key.deepseek">DeepSeek API key</span>
+      <span class="keyrow"><input type="password" autocomplete="off" spellcheck="false" data-i18n-ph="key.ph"><button class="keysave" data-i18n="key.save">保存</button><button class="keyclear" hidden data-i18n="key.clear">删除</button></span></label>
+    <p class="hint keystatus"></p>
+  </div>
+  <div class="keybox" data-provider="anthropic">
+    <label class="field"><span data-i18n="key.anthropic">Claude API key</span>
+      <span class="keyrow"><input type="password" autocomplete="off" spellcheck="false" data-i18n-ph="key.ph"><button class="keysave" data-i18n="key.save">保存</button><button class="keyclear" hidden data-i18n="key.clear">删除</button></span></label>
+    <p class="hint keystatus"></p>
+  </div>
+  <label class="field"><span data-i18n="scene">场景</span><input id="set-scene" value="a German language class"></label>
+  <p class="hint" data-i18n="scene.hint"></p>
+  <h3 data-i18n="sec.bar">悬浮字幕</h3>
+  <label class="field"><span data-i18n="bar.font">字号</span><input id="set-font" type="range" min="16" max="48" value="26"></label>
+  <label class="field"><span data-i18n="bar.text">文字不透明度</span><input id="set-text-alpha" type="range" min="20" max="100" value="100"></label>
+  <label class="field"><span data-i18n="bar.bg">背景不透明度</span><input id="set-bg-alpha" type="range" min="0" max="100" value="100"></label>
+  <p class="hint" data-i18n="bar.hint"></p>
+  <div class="toggle"><span><span data-i18n="lock">鼠标穿透</span><span class="hk" id="hk"></span></span><button class="switch" data-k="clickThrough"></button></div>
+  <p class="hint" id="hk-hint" ></p>
+  <h3 data-i18n="sec.about">关于</h3>
+  <p class="hint" id="about"></p>
+  <p class="hint" data-i18n="credits"></p>
 </aside>
 
 <div id="boot" class="boot" hidden>
-  界面脚本没有加载。直接双击打开 HTML 文件时浏览器会拦截脚本。<br>
-  请用 <b>run.bat</b> 启动桌面版，或打开 <b>http://localhost:17860/main.html?demo</b> 看演示。
+  界面脚本没有加载：直接打开 HTML 文件时浏览器会拦截脚本。请用 <b>ui.bat</b> 启动桌面版。<br>
+  The page scripts did not load: browsers block them for HTML files opened directly. Start the app with <b>ui.bat</b>.
 </div>
 <script>
   // module scripts are blocked on file:// - say so instead of leaving dead buttons

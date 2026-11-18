@@ -17,6 +17,7 @@ from . import models
 from .audio import AudioSystem, FileSource, LiveSource
 from .edition import EDITION
 from .echo import EchoCanceller, EchoFilter
+from .i18n import tr
 from .segmenter import Caption, SegmenterConfig, StreamProcessor
 from .sensevoice import SenseVoice
 from .stt import SttEngine
@@ -40,6 +41,8 @@ class Settings:
     file: str = ""  # debug: replay this file as "other" instead of live capture
     file_me: str = ""  # debug: replay this file as "me"
     speed: float = 1.0  # replay speed for file/file_me
+    # interface language: auto (follow Windows) | zh | en; default from the edition (friends: zh)
+    ui_lang: str = field(default_factory=lambda: EDITION.default_ui_lang)
 
     RESTART_KEYS = ("engine", "aec", "echo_filter", "zh", "speaker", "mic", "sources", "min_silence",
                     "file", "file_me", "speed")
@@ -98,7 +101,7 @@ class _NoBackend:
     model = "-"
 
     def __call__(self, *args):
-        raise TranslationUnavailable("翻译不可用")
+        raise TranslationUnavailable(tr("mt.unavailable"))
 
 
 class Pipeline:

@@ -27,6 +27,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+from .i18n import lang, tr
 from .stt import is_cjk, join_text
 from .translate import PENDING
 
@@ -132,11 +133,10 @@ _sig(kernel32, "GetModuleHandleW", wintypes.HMODULE, wintypes.LPCWSTR)
 FONT_DIR = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
 BG = np.array([18, 14, 12], dtype=np.float32) / 255  # #0c0e12, in BGR order like every layer here
 WHO_COLOR = {"other": (0x5E, 0xE0, 0xD4), "me": (0x9B, 0xE2, 0x7B)}
-LABEL = {"other": "对方", "me": "我"}
 ACCENT = (0x6E, 0xA8, 0xFF)
 WHITE = (255, 255, 255)
 HOVER_BG_FLOOR = 0.3  # under the mouse the panel shows at least this much, to see where to drag
-TOOLS = [("smaller", "A−"), ("bigger", "A+"), ("tr", "译文"), ("lock", "穿透"), ("close", "×")]
+TOOLS = [("smaller", "A−"), ("bigger", "A+"), ("tr", "bar.tr"), ("lock", "bar.lock"), ("close", "×")]  # i18n keys or text
 NO_LINE_START = set("，。、？！：；,.?!:;…）)」』”’")
 SHOW = 2  # newest captions on screen
 MIN_FRAME_S = 0.12  # caption updates are drawn at most ~8 times a second (a frame costs ~25 ms)
@@ -236,22 +236,22 @@ def render(w: int, h: int, scale: float, entries: list[dict], prefs: dict, *, ho
     if not entries:
         f = _font(px(15), False)
         asc, desc = f.getmetrics()
-        blocks.append((asc + desc, lambda y, f=f, asc=asc: text.text((pad_l, y + asc), "等待说话…", f, WHITE, 0.45)))
+        blocks.append((asc + desc, lambda y, f=f, asc=asc: text.text((pad_l, y + asc), tr("bar.idle"), f, WHITE, 0.45)))
     for i, e in enumerate(entries):
         old = i < len(entries) - 1
         parts = []  # (font, line height, lines)
         fw = _font(px(11), False)
-        parts.append((fw, round(px(11) * 1.25), [[(0.0, LABEL.get(e["stream"], ""), WHO_COLOR.get(e["stream"], WHITE), 1.0)]]))
+        parts.append((fw, round(px(11) * 1.25), [[(0.0, tr(f"who.{e['stream']}"), WHO_COLOR.get(e["stream"], WHITE), 1.0)]]))
         committed, tentative = e.get("committed", ""), e.get("tentative", "")
         sep = " " if committed and tentative and join_text(committed, tentative) != committed + tentative else ""
         fo = _font(px(fs * (0.78 if old else 1.0)), True)
         runs = [(committed, WHITE, 1.0), (sep + tentative, WHITE, 0.55)]
         parts.append((fo, round(fo.size * 1.35), _wrap(runs, fo, width)))
-        tr = e.get("translation")
-        if prefs["translation"] and tr:
-            pending = tr == PENDING
+        tr_text = e.get("translation")
+        if prefs["translation"] and tr_text:
+            pending = tr_text == PENDING
             ft = _font(px(fs * (0.62 if pending else 0.66 if old else 0.8)), False)
-            runs = [("翻译中…" if pending else tr, WHITE, 0.6 if pending else 1.0)]
+            runs = [(tr("bar.pending") if pending else tr_text, WHITE, 0.6 if pending else 1.0)]
             parts.append((ft, round(ft.size * 1.4), _wrap(runs, ft, width)))
         height = sum(lh * len(lines) for _, lh, lines in parts) + px(2)
 
@@ -278,6 +278,7 @@ def render(w: int, h: int, scale: float, entries: list[dict], prefs: dict, *, ho
         asc, desc = f.getmetrics()
         x = w - px(8)
         for name, label in reversed(TOOLS):
+            label = tr(label) if label.startswith("bar.") else label
             bw = round(f.getlength(label)) + px(14)
             bh = asc + desc + px(8)
             rect = (x - bw, px(6), x, px(6) + bh)
@@ -372,6 +373,7 @@ class CaptionBar:
         self._resize: tuple | None = None
         self._pending = False
         self._last_paint = 0.0
+        self._drawn_lang = lang()
         self._ready = threading.Event()
 
     # ---- public, any thread
@@ -380,7 +382,13 @@ class CaptionBar:
         self._ready.wait(5)
 
     def apply(self, m: dict) -> None:
-        """A backend message; only captions matter here (same merge rules as ui/client.js)."""
+        """A backend message: captions (same merge rules as ui/client.js); a status message
+        only matters when the interface language changed (labels are drawn into the bar)."""
+        if m.get("type") == "status":
+            if m.get("ui_lang") and m["ui_lang"] != self._drawn_lang:
+                self._drawn_lang = m["ui_lang"]
+                self._request_redraw()
+            return
         if m.get("type") != "caption":
             return
         key = f"{m['stream']}:{m['utt']}"

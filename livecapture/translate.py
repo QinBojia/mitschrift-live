@@ -24,7 +24,8 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 
-from .edition import EDITION
+from . import keys
+from .i18n import tr
 from .segmenter import Caption
 from .stt import join_text
 
@@ -78,21 +79,6 @@ translate them again.
 - If <current> is already in {target}, repeat it unchanged."""
 
 
-def _user_env(name: str) -> str | None:
-    """A user-level Windows environment variable straight from the registry.
-
-    `setx NAME value` only reaches processes started afterwards; terminals that were
-    already open (e.g. inside the Claude desktop app) would otherwise not see the key.
-    """
-    try:
-        import winreg
-
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
-            return winreg.QueryValueEx(k, name)[0] or None
-    except OSError:
-        return None
-
-
 def _thinking_off(model: str) -> dict | None:
     """How to turn thinking off on a model (translation needs no reasoning); None if it can't be."""
     if model.startswith("claude-haiku-5-5"):
@@ -126,8 +112,6 @@ def make_backend(model: str, scene: str | None = DEFAULT_SCENE):
 class ClaudeBackend:
     def __init__(self, model: str = "claude-haiku-5-5", effort: str = "low", thinking_off: bool = True,
                  scene: str | None = DEFAULT_SCENE):
-        import os
-
         import anthropic
 
         self.scene = scene
@@ -135,7 +119,7 @@ class ClaudeBackend:
         self._anthropic = anthropic
         self.thinking = _thinking_off(model) if thinking_off else None
         self.usage = collections.Counter()  # input/output tokens, for cost estimates
-        key = os.environ.get("ANTHROPIC_API_KEY") or _user_env("ANTHROPIC_API_KEY")
+        key = keys.get("anthropic")
         # without a key the SDK falls back to ANTHROPIC_AUTH_TOKEN / an `ant auth login` profile
         self.client = anthropic.Anthropic(api_key=key, timeout=20.0, max_retries=2) if key else \
             anthropic.Anthropic(timeout=20.0, max_retries=2)
@@ -162,21 +146,21 @@ class ClaudeBackend:
             else:
                 resp = self.client.messages.create(**kwargs)
         except (a.AuthenticationError, a.PermissionDeniedError) as e:
-            raise TranslationUnavailable(f"Claude API key 无效或无权限 ({e.status_code})") from e
+            raise TranslationUnavailable(tr("mt.bad_key", provider="Claude", code=e.status_code)) from e
         except a.NotFoundError as e:
-            raise TranslationUnavailable(f"模型不可用: {self.model}") from e
+            raise TranslationUnavailable(tr("mt.no_model", model=self.model)) from e
         except TypeError as e:  # SDK: no credentials could be resolved
             if "auth" in str(e).lower():
-                raise TranslationUnavailable("未配置 Claude API key（ANTHROPIC_API_KEY）") from e
+                raise TranslationUnavailable(tr("mt.no_key", provider="Claude (Anthropic)")) from e
             raise
         except a.AnthropicError as e:
             if "authentication" in str(e).lower() or "api_key" in str(e).lower():
-                raise TranslationUnavailable("未配置 Claude API key（ANTHROPIC_API_KEY）") from e
+                raise TranslationUnavailable(tr("mt.no_key", provider="Claude (Anthropic)")) from e
             raise
         self.usage["input"] += resp.usage.input_tokens
         self.usage["output"] += resp.usage.output_tokens
         if resp.stop_reason == "refusal":
-            return "（未翻译）"
+            return tr("mt.untranslated")
         return "".join(b.text for b in resp.content if b.type == "text").strip()
 
 
@@ -187,17 +171,14 @@ class DeepSeekBackend:
 
     def __init__(self, model: str = "deepseek-flash", thinking_off: bool = True,
                  scene: str | None = DEFAULT_SCENE):
-        import os
-
         import openai
 
         self.scene = scene
 
         self._openai = openai
-        # explicit env var > key bundled with a packaged build > user-level env var (setx)
-        key = os.environ.get("DEEPSEEK_API_KEY") or EDITION.key("deepseek") or _user_env("DEEPSEEK_API_KEY")
+        key = keys.get("deepseek")  # env var > typed into the app > bundled > setx (keys.py)
         if not key:
-            raise TranslationUnavailable("未配置 DEEPSEEK_API_KEY")
+            raise TranslationUnavailable(tr("mt.no_key", provider="DeepSeek"))
         self.client = openai.OpenAI(api_key=key, base_url=self.BASE_URL, timeout=20.0, max_retries=2)
         self.model = model
         # deepseek-flash reasons briefly by default; translation doesn't need it
@@ -217,9 +198,9 @@ class DeepSeekBackend:
                 extra_body=self.extra_body,
             )
         except (o.AuthenticationError, o.PermissionDeniedError) as e:
-            raise TranslationUnavailable(f"DeepSeek API key 无效或无权限 ({e.status_code})") from e
+            raise TranslationUnavailable(tr("mt.bad_key", provider="DeepSeek", code=e.status_code)) from e
         except o.NotFoundError as e:
-            raise TranslationUnavailable(f"模型不可用: {self.model}") from e
+            raise TranslationUnavailable(tr("mt.no_model", model=self.model)) from e
         if resp.usage:
             self.usage["input"] += resp.usage.prompt_tokens
             self.usage["output"] += resp.usage.completion_tokens
@@ -336,8 +317,8 @@ class Translator:
             self.disabled, self.error = True, str(e)
             return None
         except Exception as e:  # noqa: BLE001 - keep captions flowing whatever the API does
-            self.error = f"翻译出错: {type(e).__name__}"
-            return "⚠ 翻译失败"
+            self.error = tr("mt.error", err=type(e).__name__)
+            return tr("mt.failed")
         self.timings.append((time.perf_counter() - t) * 1000)
         self.requests += 1
         self.error = None

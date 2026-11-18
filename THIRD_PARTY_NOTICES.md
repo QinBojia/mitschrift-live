@@ -41,7 +41,7 @@ model and carry its license.
 | nvidia-ml-py (optional, GPU name) | BSD |
 
 soxr and pystray are LGPL: they are used unmodified, as separate packages that can be
-replaced. Installers built with `build/build_friends.py` ship them as ordinary files in
+replaced. Installers built with `build/build_installer.py` ship them as ordinary files in
 `python/Lib/site-packages` and copy every package's license file into `licenses/`.
 
 ## Other files in this repository

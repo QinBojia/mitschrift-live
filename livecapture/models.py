@@ -36,14 +36,37 @@ SENSEVOICE_REPO = "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17
 SENSEVOICE_DIR = MODELS_DIR / "sensevoice-small-2024-07-17"
 
 
+HF_MIRROR = "https://hf-mirror.com"
+_endpoint: list[str | None] = []  # cached: None = huggingface.co
+
+
+def hub_endpoint() -> str | None:
+    """Where to download models from: huggingface.co, or - when it can't be reached within a
+    few seconds, as in mainland China - the hf-mirror.com mirror. HF_ENDPOINT, if set, wins
+    (huggingface_hub reads it itself)."""
+    if os.environ.get("HF_ENDPOINT"):
+        return None
+    if not _endpoint:
+        import urllib.request
+
+        try:
+            urllib.request.urlopen(urllib.request.Request("https://huggingface.co", method="HEAD"), timeout=5)
+            _endpoint.append(None)
+        except OSError:
+            print(f"huggingface.co not reachable, downloading from {HF_MIRROR}", flush=True)
+            _endpoint.append(HF_MIRROR)
+    return _endpoint[0]
+
+
 def _ensure(repo: str, local_dir: Path, files: list[str]) -> Path:
     missing = [f for f in files if not (local_dir / f).exists()]
     if missing:
         from huggingface_hub import hf_hub_download
 
+        endpoint = hub_endpoint()
         for f in missing:
-            print(f"downloading {repo}/{f} ...")
-            hf_hub_download(repo, f, local_dir=local_dir)
+            print(f"downloading {repo}/{f} ...", flush=True)
+            hf_hub_download(repo, f, local_dir=local_dir, endpoint=endpoint)
     return local_dir
 
 

@@ -11,6 +11,7 @@
 // The page URL carries ?port=&token= from the desktop shell (livecapture/server.py).
 // Client -> server:
 //   {type:"control", action:"start"|"stop"}   {type:"set", key, value}
+import { t } from "./i18n.js";
 
 export const PENDING = "…";
 
@@ -61,11 +62,11 @@ export function connect(store, onSend) {
     ws.onmessage = (e) => store.apply(JSON.parse(e.data));
     ws.onclose = () => {
       store.apply({ type: "status", connected: false, running: false,
-        error: "未连接到随堂字幕后台（请用 ui.bat 启动），重连中…" });
+        error: t("conn.lost") });
       setTimeout(open, 1500);
     };
   };
-  store.apply({ type: "status", connected: false, error: "正在连接随堂字幕后台…" });
+  store.apply({ type: "status", connected: false, error: t("conn.connecting") });
   open();
   return (msg) => ws && ws.readyState === 1 && ws.send(JSON.stringify(msg));
 }
@@ -99,7 +100,7 @@ function runDemo(store) {
   store.apply({
     type: "status", connected: true, running: true, engine: "NPU", device: "Intel AI Boost (int8)", model: "deepseek-flash",
     target: "zh", scene: "a German language class", asr_ms: 152, mt_ms: 731, error: null,
-    sources: { other: "Speakers (Realtek Audio)", me: "麦克风 (USB Microphone)" },
+    sources: { other: "Speakers (Realtek Audio)", me: "Microphone (USB Audio)" },
   });
   let speaking = null;
   setInterval(() => {

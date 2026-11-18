@@ -1,0 +1,18 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install (CPU runtime + test tools)
+        run: uv sync --extra cpu --group dev
+      - name: Unit tests
+        run: uv run pytest -q
+      - name: Lint
+        run: uvx ruff@0.14.0 check livecapture tests bench build

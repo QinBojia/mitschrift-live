@@ -1,0 +1,71 @@
+﻿Mitschrift Live (随堂字幕) - Quick start
+========================================
+
+Real-time captions and translation: what your computer plays ("Them") and your microphone
+("Me"), recognized on your own PC, translated sentence by sentence.
+
+1. Installing
+   If Windows says "Windows protected your PC": click "More info" -> "Run anyway"
+   (the installer is not code-signed). It installs for your user only, no admin rights needed.
+
+2. Translation needs an API key
+   Speech recognition runs locally and needs no account. For translation, open the app,
+   click the gear (top right) -> Translation, and paste a key:
+   - DeepSeek (default model, inexpensive): https://platform.deepseek.com/
+   - or Claude (Anthropic): https://console.anthropic.com/
+   The key is stored encrypted for your Windows user on this PC. Only the text of finished
+   sentences is sent to the translation service; audio never leaves your PC.
+   Without a key you still get captions (set Translate to "Off").
+
+3. Using it
+   - Press Start. The first start loads the models (a few seconds; the NPU edition optimizes
+     the model for the NPU once, about a minute).
+   - Choose the translation language at the top right.
+   - The floating caption bar can be dragged anywhere and resized at its edges; its buttons
+     appear on hover. Click-through lets clicks reach the window below; Ctrl+Alt+L turns it off.
+   - Settings -> Caption bar: text and background opacity separately.
+   - Closing the window keeps the app in the tray (bottom right); quit from the tray menu.
+   - Speakers work (echo cancellation), headphones work best.
+
+4. Editions
+   CPU: any PC. NPU: Intel Core Ultra NPU, falls back to the CPU. AMD: integrated graphics
+   through DirectML (AMD Radeon, also Intel), falls back to the CPU.
+
+5. Problems
+   Log file: C:\Users\<you>\.livecapture\logs\live-capture.log
+   Source code and issues: https://github.com/QinBojia/mitschrift-live
+
+
+随堂字幕（Mitschrift Live）快速上手
+================================
+
+实时字幕和翻译：识别电脑里播放的声音（"对方"）和你的麦克风（"我"），在你自己的电脑上识别，
+逐句翻译。
+
+1. 安装
+   如果弹出"Windows 已保护你的电脑"：点"更多信息"→"仍要运行"（安装包没有代码签名）。
+   只装给当前用户，不需要管理员权限。
+
+2. 翻译需要 API key
+   语音识别在本地运行，不需要账号。翻译需要在程序里点右上角齿轮 → 翻译，粘贴一个 key：
+   - DeepSeek（默认模型，便宜）：https://platform.deepseek.com/
+   - 或 Claude（Anthropic）：https://console.anthropic.com/
+   key 只在这台电脑上为当前 Windows 用户加密保存。发给翻译服务的只有说完的句子文字，
+   声音不会离开你的电脑。没有 key 也能看字幕（译文选"关"）。
+
+3. 使用
+   - 点"开始"。第一次启动要加载模型，几秒钟；NPU 版第一次会为 NPU 优化模型，约 1 分钟。
+   - 右上角选择译文语言。
+   - 悬浮字幕条可以拖到任何位置、拖边缘改大小；鼠标移上去会出现按钮。
+     "穿透"打开后点击会落到下面的窗口，按 Ctrl+Alt+L 关闭。
+   - 设置 → 悬浮字幕：可以分别调文字和背景的不透明度。
+   - 关掉主窗口后程序留在右下角托盘；从托盘菜单退出。
+   - 外放也能用（会自动消除回声），戴耳机效果最好。
+
+4. 版本
+   CPU 版：任何电脑。NPU 版：Intel Core Ultra 的 NPU，不可用时改用 CPU。
+   AMD 版：通过 DirectML 用核显（AMD Radeon，也支持 Intel），不可用时改用 CPU。
+
+5. 出问题时
+   日志文件：C:\Users\你的用户名\.livecapture\logs\live-capture.log
+   源代码和问题反馈：https://github.com/QinBojia/mitschrift-live

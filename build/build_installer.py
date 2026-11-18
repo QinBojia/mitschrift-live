@@ -1,22 +1,26 @@
-"""Build the friends' editions of Mitschrift Live (随堂字幕): DeepSeek translation with a bundled key, models
-included, speech recognition on the CPU (--edition cpu), on an Intel NPU (--edition npu) or on
-integrated graphics via DirectML (--edition amd), the last two with CPU fallback.
-Produces a self-contained folder, then (optionally) the installer.
+"""Build Windows installers of Mitschrift Live (随堂字幕): a self-contained folder (official
+embeddable Python, packages, models) plus an Inno Setup installer, per edition: speech
+recognition on the CPU (--edition cpu), an Intel NPU (--edition npu) or integrated graphics
+via DirectML (--edition amd), the last two with CPU fallback.
 
-Layout of the output folder (BUILD_ROOT/LiveCapture-CPU or -NPU):
+Public builds (default) contain no API key: users enter their own in the app.
+--friends builds a private variant for people you trust: DeepSeek only, with a key bundled
+from FRIENDS_DEEPSEEK_KEY (else DEEPSEEK_API_KEY). The key is only obfuscated - anyone with
+the installer can extract it - so use a separate key with a spending limit and never
+publish such builds.
+
+Layout of the output folder (BUILD_ROOT/Public-<ED>, or LiveCapture-<ED> for --friends):
   python/            official embeddable Python 3.12 + site-packages + VC++ runtime DLLs
   app/livecapture/   code          app/ui/  pages          app/models/  ASR + VAD models
-  app/edition.json   edition (allowed engines, deepseek-flash, obfuscated key)
-  live-capture.ico   licenses/   使用说明.txt
+  app/edition.json   edition: allowed engines (friends: model, key, language)
+  live-capture.ico   licenses/   QuickStart.txt (friends: 使用说明.txt)
 
 Usage (from the dev venv):
-  python build/build_friends.py --edition cpu              build the folder
-  python build/build_friends.py --edition npu --installer  ... and compile build/installer.iss
-  python build/build_friends.py --patch                    small code-only update (build/update.iss)
+  python build/build_installer.py --edition cpu --installer    public CPU installer
+  python build/build_installer.py --edition amd --friends --installer
+  python build/build_installer.py --patch                      code-only update, any edition
+Installers land in BUILD_ROOT/public (public) or BUILD_ROOT (friends); the update in BUILD_ROOT.
 Bump livecapture.__version__ first; a patch only works while packages and models are unchanged.
-
-The DeepSeek key comes from FRIENDS_DEEPSEEK_KEY, else DEEPSEEK_API_KEY (process or user
-environment). It is obfuscated in edition.json and never printed.
 """
 
 from __future__ import annotations
@@ -37,7 +41,7 @@ sys.path.insert(0, str(ROOT))
 
 from livecapture import __version__  # noqa: E402
 from livecapture.edition import hide  # noqa: E402
-from livecapture.translate import _user_env  # noqa: E402
+from livecapture.keys import user_env  # noqa: E402
 from livecapture.tray import save_app_icon  # noqa: E402
 
 BUILD_ROOT = Path(os.environ.get("LIVECAPTURE_BUILD", Path.home() / "LiveCaptureBuild"))
@@ -47,14 +51,14 @@ PY_VERSION = "3.12.10"  # newest 3.12 with an official embeddable build
 PY_URL = f"https://www.python.org/ftp/python/{PY_VERSION}/python-{PY_VERSION}-embed-amd64.zip"
 DEV_MODELS = Path.home() / ".livecapture" / "models"
 
-# runtime packages of the windowed app (no CUDA / OpenVINO / Claude / CLI extras);
+# runtime packages of the windowed app (no CUDA / OpenVINO / CLI extras);
 # versions are pinned to what the dev venv runs, so the build behaves like the tests
 PACKAGES = {
     "onnxruntime": "onnxruntime-gpu",  # CPU build, same version as the dev GPU build
     "onnx-asr": "onnx-asr", "numpy": "numpy", "soundfile": "soundfile", "soxr": "soxr",
     "pyaudiowpatch": "pyaudiowpatch", "livekit": "livekit", "pywebview": "pywebview",
     "pystray": "pystray", "pillow": "pillow", "pycaw": "pycaw", "websockets": "websockets",
-    "openai": "openai", "kaldi-native-fbank": "kaldi-native-fbank",
+    "openai": "openai", "anthropic": "anthropic", "kaldi-native-fbank": "kaldi-native-fbank",
 }
 EDITIONS = {
     "cpu": {"engines": ["cpu"], "engine": "cpu", "packages": {}, "models": {}},
@@ -96,12 +100,19 @@ Silero VAD (voice activity detection)
 """
 
 
+def clean_env() -> dict[str, str]:
+    """Environment for child processes without the variables uv's venv launcher sets for this
+    interpreter: inherited by uv or the embedded Python they make another Python load this
+    one's standard library ("SRE module mismatch")."""
+    return {k: v for k, v in os.environ.items() if k not in ("PYTHONHOME", "PYTHONPATH", "UV_INTERNAL__PYTHONHOME")}
+
+
 def step(msg: str) -> None:
     print(f"==> {msg}", flush=True)
 
 
 def deepseek_key() -> str:
-    key = os.environ.get("FRIENDS_DEEPSEEK_KEY") or os.environ.get("DEEPSEEK_API_KEY") or _user_env("DEEPSEEK_API_KEY")
+    key = os.environ.get("FRIENDS_DEEPSEEK_KEY") or os.environ.get("DEEPSEEK_API_KEY") or user_env("DEEPSEEK_API_KEY")
     if not key:
         sys.exit("No DeepSeek key: set FRIENDS_DEEPSEEK_KEY (or DEEPSEEK_API_KEY) first")
     return key
@@ -133,14 +144,14 @@ def install_packages(edition: str) -> None:
     target = DIST / "python" / "Lib" / "site-packages"
     subprocess.run(["uv", "pip", "install", "--target", str(target), "--python-version", "3.12",
                     "--python-platform", "x86_64-pc-windows-msvc", "--quiet", *reqs],
-                   check=True)
+                   check=True, env=clean_env())
     for junk in ("tests", "test"):  # a little lighter
         for d in target.glob(f"*/{junk}"):
             if d.is_dir():
                 shutil.rmtree(d, ignore_errors=True)
 
 
-def copy_app(edition: str) -> None:
+def copy_app(edition: str, friends: bool) -> None:
     app = DIST / "app"
     shutil.copytree(ROOT / "livecapture", app / "livecapture", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     shutil.copytree(ROOT / "ui", app / "ui")
@@ -150,11 +161,13 @@ def copy_app(edition: str) -> None:
         for f in files:
             shutil.copy2(DEV_MODELS / model / f, app / "models" / model / f)
     ed = EDITIONS[edition]
-    info = {"name": f"friends-{edition}", "engines": ed["engines"], "engine": ed["engine"],
-            "models": ["deepseek-flash"], "default_model": "deepseek-flash", "deepseek_key": hide(deepseek_key())}
+    info = {"name": f"{'friends' if friends else 'public'}-{edition}", "engines": ed["engines"], "engine": ed["engine"]}
+    if friends:
+        info.update(models=["deepseek-flash"], default_model="deepseek-flash", deepseek_key=hide(deepseek_key()),
+                    ui_lang="zh")
     (app / "edition.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
     save_app_icon(DIST / "live-capture.ico")
-    shutil.copy2(ROOT / "build" / "使用说明.txt", DIST / "使用说明.txt")
+    shutil.copy2(ROOT / "build" / notes_file(friends), DIST / notes_file(friends))
 
 
 def collect_licenses() -> None:
@@ -175,7 +188,7 @@ def collect_licenses() -> None:
 def precompile() -> None:
     py = DIST / "python" / "python.exe"
     subprocess.run([str(py), "-m", "compileall", "-q", "-j", "0", str(DIST / "app"),
-                    str(DIST / "python" / "Lib" / "site-packages")], check=False)
+                    str(DIST / "python" / "Lib" / "site-packages")], check=False, env=clean_env())
 
 
 def _iscc() -> Path:
@@ -188,11 +201,17 @@ def _iscc() -> Path:
     return iscc
 
 
-def build_installer(edition: str) -> None:
+def notes_file(friends: bool) -> str:
+    return "使用说明.txt" if friends else "QuickStart.txt"
+
+
+def build_installer(edition: str, friends: bool) -> None:
     step("compiling installer")
+    out = BUILD_ROOT if friends else BUILD_ROOT / "public"
+    out.mkdir(parents=True, exist_ok=True)
     subprocess.run([str(_iscc()), f"/DAppVersion={__version__}", f"/DEdition={edition.upper()}",
-                    f"/DSourceDir={DIST}", f"/DOutputDir={BUILD_ROOT}",
-                    str(ROOT / "build" / "installer.iss")], check=True)
+                    f"/DSourceDir={DIST}", f"/DOutputDir={out}", f"/DNotes={notes_file(friends)}",
+                    *(["/DFriends"] if friends else []), str(ROOT / "build" / "installer.iss")], check=True)
 
 
 def build_patch() -> None:
@@ -203,7 +222,6 @@ def build_patch() -> None:
     skip = shutil.ignore_patterns("__pycache__", "*.pyc")
     shutil.copytree(ROOT / "livecapture", stage / "app" / "livecapture", ignore=skip)
     shutil.copytree(ROOT / "ui", stage / "app" / "ui", ignore=skip)
-    shutil.copy2(ROOT / "build" / "使用说明.txt", stage / "使用说明.txt")
     save_app_icon(stage / "live-capture.ico")
     step(f"compiling update {__version__}")
     subprocess.run([str(_iscc()), f"/DAppVersion={__version__}", f"/DSourceDir={stage}",
@@ -216,24 +234,25 @@ def main() -> None:
     ap.add_argument("--edition", choices=sorted(EDITIONS), default="cpu")
     ap.add_argument("--installer", action="store_true", help="also compile the Inno Setup installer")
     ap.add_argument("--installer-only", action="store_true", help="only compile the installer from the existing folder")
+    ap.add_argument("--friends", action="store_true", help="private build with a bundled DeepSeek key (see above)")
     ap.add_argument("--patch", action="store_true", help="only build the small code update (all editions)")
     args = ap.parse_args()
     if args.patch:
         return build_patch()
-    DIST = BUILD_ROOT / f"LiveCapture-{args.edition.upper()}"
+    DIST = BUILD_ROOT / (f"LiveCapture-{args.edition.upper()}" if args.friends else f"Public-{args.edition.upper()}")
     if not args.installer_only:
         if DIST.exists():
             shutil.rmtree(DIST)
         DIST.mkdir(parents=True)
         step("embeddable Python");  fetch_python()      # noqa: E702
         step("packages");           install_packages(args.edition)  # noqa: E702
-        step("app, ui, models");    copy_app(args.edition)          # noqa: E702
+        step("app, ui, models");    copy_app(args.edition, args.friends)  # noqa: E702
         step("licenses");           collect_licenses()  # noqa: E702
         step("precompile");         precompile()        # noqa: E702
         size = sum(p.stat().st_size for p in DIST.rglob("*") if p.is_file()) / 2**20
         step(f"folder ready: {DIST} ({size:.0f} MB)")
     if args.installer or args.installer_only:
-        build_installer(args.edition)
+        build_installer(args.edition, args.friends)
 
 
 if __name__ == "__main__":

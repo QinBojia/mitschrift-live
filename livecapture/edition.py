@@ -26,6 +26,13 @@ class Edition:
     models: tuple[str, ...] | None = None  # allowed translation models; None = any
     default_model: str | None = None
     deepseek_key: str | None = None  # obfuscated
+    ui_lang: str | None = None  # default interface language ("zh" / "en"); None = follow Windows
+
+    @property
+    def default_ui_lang(self) -> str:
+        """Friends' builds are for Chinese speakers, whatever language their Windows shows
+        (also builds made before edition.json had ui_lang); everyone else: follow Windows."""
+        return self.ui_lang or ("zh" if self.name.startswith("friends") else "auto")
 
     @property
     def locked_engine(self) -> bool:

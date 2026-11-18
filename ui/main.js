@@ -1,4 +1,7 @@
-import { Store, connect, PENDING, LABEL, LANG, fmtTime, levelPct, escapeHtml, joinText } from "./client.js";
+import { Store, connect, PENDING, fmtTime, levelPct, escapeHtml, joinText } from "./client.js";
+import { t, setLang, applyI18n } from "./i18n.js";
+
+applyI18n();  // first guess: the WebView's language; the backend's setting follows in the first status
 
 const store = new Store();
 const send = connect(store);
@@ -37,15 +40,15 @@ function render(e) {
     + (e.final && !e.translation ? " notr" : "");
   el.querySelector(".t").textContent = fmtTime(e.start);
   const who = el.querySelector(".who");
-  who.textContent = LABEL[e.stream] ?? e.stream;
+  who.textContent = t(`who.${e.stream}`);
   who.className = `who ${e.stream}`;
-  el.querySelector(".lang").textContent = LANG[e.src] ?? "";
+  el.querySelector(".lang").textContent = e.src ? t(`lang.${e.src}`) : "";
   const orig = el.querySelector(".orig");
   const sep = e.committed && e.tentative && joinText(e.committed, e.tentative) !== e.committed + e.tentative ? " " : "";
   orig.innerHTML = highlight(e.committed) + (e.tentative ? `${sep}<span class="tent">${highlight(e.tentative)}</span>` : "");
   orig.classList.toggle("caret", live);
   const tr = el.querySelector(".trans");
-  if (e.translation === PENDING) { tr.textContent = "翻译中…"; tr.className = "trans pending"; }
+  if (e.translation === PENDING) { tr.textContent = t("pending"); tr.className = "trans pending"; }
   else { tr.innerHTML = e.translation ? highlight(e.translation) : ""; tr.className = "trans"; }
   tr.style.display = e.translation ? "" : "none";
   applyFilter(el, e);
@@ -77,7 +80,7 @@ $("jump").onclick = () => { follow = true; scrollToEnd(); };
 
 function updateCount() {
   const n = [...store.entries.values()].filter((e) => e.final).length;
-  $("count").textContent = n ? `${n} 句` : "";
+  $("count").textContent = n ? t("count", { n }) : "";
 }
 
 $("search").addEventListener("input", (ev) => {
@@ -92,21 +95,22 @@ renderStatus(); // the demo / first server message may arrive before this listen
 
 function renderStatus() {
   const s = store.status;
+  if (s.ui_lang && setLang(s.ui_lang)) onLanguageChange();
   $("dot").classList.toggle("live", !!s.running);
-  $("run").textContent = s.running ? "暂停" : "开始";
+  $("run").textContent = s.running ? t("run.pause") : t("run.start");
   $("run").classList.toggle("primary", !s.running);
   $("run").disabled = !s.connected || !!s.loading;
-  $("run").title = s.connected ? (s.loading ?? "") : "后台未连接";
+  $("run").title = s.connected ? (s.loading ?? "") : t("run.offline");
   for (const b of $("target").children) b.classList.toggle("on", b.dataset.v === s.target);
   $("dev-other").textContent = s.sources?.other ?? "";
   $("dev-me").textContent = s.sources?.me ?? "";
-  const lag = s.lag > 1 ? ` · 积压 ${s.lag}s` : "";
+  const lag = s.lag > 1 ? t("stats.lag", { s: s.lag }) : "";
   // recording: armed (records on next start) vs. live (writing now, with a timer)
   const rec = $("rec");
   rec.classList.toggle("armed", !!s.record_on && !s.recording);
   rec.classList.toggle("live", !!s.recording);
   const mm = (n) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}`;
-  rec.textContent = s.recording ? `● 录音中 ${mm(s.record_secs || 0)}` : s.record_on ? "● 录音（开始后录）" : "● 录音";
+  rec.textContent = s.recording ? t("rec.live", { t: mm(s.record_secs || 0) }) : s.record_on ? t("rec.armed") : t("rec");
   rec.disabled = !s.connected;
   $("openRec").hidden = !s.last_recording;
   $("stats").innerHTML = s.loading
@@ -114,10 +118,19 @@ function renderStatus() {
     : s.error
       ? `<span class="error">${escapeHtml(s.error)}</span>`
       : (s.notice ? `<span class="notice">${escapeHtml(s.notice)}</span>` : "") +
-        `<span>${escapeHtml(s.engine)} 识别 <b>${s.asr_ms ?? "-"}</b> ms</span>` +
-        `<span>${escapeHtml(s.model)}${s.target === "off" ? "" : ` 翻译 <b>${s.mt_ms ?? "-"}</b> ms`}${lag}</span>`;
+        `<span>${t("stats.asr", { engine: escapeHtml(s.engine), ms: s.asr_ms ?? "-" })}</span>` +
+        `<span>${escapeHtml(s.model)}${s.target === "off" ? "" : t("stats.mt", { ms: s.mt_ms ?? "-" })}${lag}</span>`;
   if (s.settings) applySettings(s.settings);
   if (s.edition) applyEdition(s);
+  if (s.keys) renderKeys(s.keys);
+}
+
+// texts filled in by code (not data-i18n) after the language changed
+function onLanguageChange() {
+  for (const e of store.entries.values()) render(e);
+  updateCount();
+  fillDevices();
+  showHotkey();
 }
 
 // a packaged edition (e.g. the friends' build) pins some choices: hide what can't change
@@ -130,8 +143,10 @@ function applyEdition(s) {
   if (ed.models) {
     for (const o of model.options) o.hidden = !ed.models.includes(o.value);
     model.closest(".field").hidden = ed.models.length <= 1;
+    // a build that only translates with DeepSeek has no use for a Claude key
+    document.querySelector('.keybox[data-provider="anthropic"]').hidden = !ed.models.some((m) => m.startsWith("claude"));
   }
-  $("about").textContent = `随堂字幕 Mitschrift Live ${s.version ?? ""}${ed.name !== "dev" ? ` · ${ed.name}` : ""} · 数据目录 ${s.data_dir ?? ""}`;
+  $("about").textContent = `随堂字幕 Mitschrift Live ${s.version ?? ""}${ed.name !== "dev" ? ` · ${ed.name}` : ""} · ${t("about.data")} ${s.data_dir ?? ""}`;
 }
 
 // reflect the backend's saved settings in the drawer (skip a control while it has focus)
@@ -142,19 +157,42 @@ function applySettings(cfg) {
   setVal("set-scene", cfg.scene);
   setVal("set-speaker", cfg.speaker ?? "");
   setVal("set-mic", cfg.mic ?? "");
+  setVal("set-ui_lang", cfg.ui_lang ?? "auto");
   for (const k of ["aec", "zh"]) document.querySelector(`.switch[data-k="${k}"]`)?.classList.toggle("on", !!cfg[k]);
 }
 
-store.addEventListener("devices", () => {
+function fillDevices() {
   const fill = (id, names, label) => {
     const el = $(id);
-    el.innerHTML = `<option value="">${label}</option>` +
+    el.innerHTML = `<option value="">${escapeHtml(label)}</option>` +
       names.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
   };
-  fill("set-speaker", store.devices.speakers ?? [], "Windows 默认输出");
-  fill("set-mic", store.devices.mics ?? [], "Windows 默认麦克风");
+  fill("set-speaker", store.devices.speakers ?? [], t("dev.default_out"));
+  fill("set-mic", store.devices.mics ?? [], t("dev.default_in"));
   if (store.status.settings) applySettings(store.status.settings);
-});
+}
+store.addEventListener("devices", fillDevices);
+fillDevices();
+
+/* ---------------------------------------------------------------- API keys */
+
+// where each provider's key comes from (the backend never sends the key itself)
+function renderKeys(keys) {
+  for (const box of document.querySelectorAll(".keybox")) {
+    const k = keys[box.dataset.provider] ?? {};
+    const status = box.querySelector(".keystatus");
+    status.textContent = k.source ? t(`key.${k.source}`, { hint: k.hint }) : t("key.none");
+    status.classList.toggle("none", !k.source);
+    box.querySelector(".keyclear").hidden = k.source !== "saved";
+  }
+}
+for (const box of document.querySelectorAll(".keybox")) {
+  const input = box.querySelector("input");
+  const save = (key) => send({ type: "set", key: "api_key", value: { provider: box.dataset.provider, key } });
+  box.querySelector(".keysave").onclick = () => { if (input.value.trim()) { save(input.value.trim()); input.value = ""; } };
+  input.onkeydown = (ev) => ev.key === "Enter" && box.querySelector(".keysave").click();
+  box.querySelector(".keyclear").onclick = () => save("");
+}
 store.addEventListener("levels", () => {
   $("lv-other").style.width = levelPct(store.levels.other) + "%";
   $("lv-me").style.width = levelPct(store.levels.me) + "%";
@@ -183,7 +221,7 @@ for (const sw of document.querySelectorAll(".switch")) {
 // desktop shell -> page: keep the click-through switch in sync (global hotkey, caption-bar button)
 window.__setLock = (on) => document.querySelector('.switch[data-k="clickThrough"]').classList.toggle("on", on);
 for (const [id, key] of [["set-engine", "engine"], ["set-model", "model"], ["set-scene", "scene"],
-                         ["set-speaker", "speaker"], ["set-mic", "mic"]]) {
+                         ["set-speaker", "speaker"], ["set-mic", "mic"], ["set-ui_lang", "ui_lang"]]) {
   $(id).onchange = (ev) => send({ type: "set", key, value: ev.target.value });
 }
 // caption-bar look: drawn by the desktop shell, live while dragging the sliders
@@ -197,10 +235,13 @@ window.__setBarPrefs = (p) => {
   set("set-text-alpha", Math.round(p.text_alpha * 100));
   set("set-bg-alpha", Math.round(p.bg_alpha * 100));
 };
-window.__setHotkey = (hk) => {
-  $("hk").textContent = ` · ${hk}`;
-  $("hk-hint").textContent = `穿透开启后字幕条无法点击，按 ${hk} 或在这里关闭。`;
-};
+let hotkey = null;  // the global hotkey the desktop shell managed to register
+function showHotkey() {
+  $("hk").textContent = hotkey ? ` · ${hotkey}` : "";
+  $("hk-hint").textContent = hotkey ? t("lock.hint_hk", { hk: hotkey }) : t("lock.hint");
+}
+window.__setHotkey = (hk) => { hotkey = hk; showHotkey(); };
+showHotkey();
 window.addEventListener("pywebviewready", async () => {
   const p = await api()?.get_bar_prefs?.();
   if (p) window.__setBarPrefs(p);
@@ -219,9 +260,9 @@ function exportAs(fmt) {
   if (fmt === "srt") {
     out = done.map((e, i) => `${i + 1}\n${srtTime(e.start)} --> ${srtTime(e.end ?? e.start + 3)}\n${e.committed}${e.translation ? "\n" + e.translation : ""}\n`).join("\n");
   } else if (fmt === "md") {
-    out = "# 随堂字幕 Mitschrift Live\n\n" + done.map((e) => `**${fmtTime(e.start)} ${LABEL[e.stream]}** ${e.committed}${e.translation ? `  \n> ${e.translation}` : ""}\n`).join("\n");
+    out = "# 随堂字幕 Mitschrift Live\n\n" + done.map((e) => `**${fmtTime(e.start)} ${t(`who.${e.stream}`)}** ${e.committed}${e.translation ? `  \n> ${e.translation}` : ""}\n`).join("\n");
   } else {
-    out = done.map((e) => `[${fmtTime(e.start)}] ${LABEL[e.stream]}: ${e.committed}${e.translation ? `\n    → ${e.translation}` : ""}`).join("\n");
+    out = done.map((e) => `[${fmtTime(e.start)}] ${t(`who.${e.stream}`)}: ${e.committed}${e.translation ? `\n    → ${e.translation}` : ""}`).join("\n");
   }
   if (api()?.save_text) return api().save_text(out, fmt);
   const a = document.createElement("a");

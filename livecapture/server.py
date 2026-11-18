@@ -23,7 +23,8 @@ from pathlib import Path
 
 from websockets.asyncio.server import ServerConnection, serve
 
-from . import __version__, models
+from . import __version__, i18n, keys, models
+from .i18n import tr
 from .audio import AudioSystem
 from .edition import EDITION
 from .pipeline import ModelCache, Pipeline, Settings
@@ -33,7 +34,8 @@ from .segmenter import Caption
 from .translate import detect_de_en
 
 SETTINGS_FILE = models.APP_DIR / "settings.json"
-ENGINE_LABEL = {"cuda": "GPU", "npu": "NPU", "dml": "核显", "cpu": "CPU"}
+def engine_label(engine: str) -> str:
+    return tr(f"engine.{engine}") if engine in ("cuda", "npu", "dml", "cpu") else engine
 
 _last_times: tuple[int, int] | None = None  # (idle, total) from the previous _cpu_percent() call
 
@@ -59,10 +61,12 @@ class Backend:
     def __init__(self, settings_path: Path = SETTINGS_FILE):
         self.settings_path = settings_path
         self.settings = Settings.load(settings_path)
+        i18n.set_lang(self.settings.ui_lang)
         self.cache = ModelCache()
         self.pipeline: Pipeline | None = None
         self.token = secrets.token_urlsafe(18)
         self.listeners: list = []  # callables getting every broadcast message (dict), any thread
+        self._key_status = keys.status()  # where each translation key comes from (no key material)
         self.port: int | None = None
         self.loading: str | None = None
         self.error: str | None = None
@@ -138,13 +142,13 @@ class Backend:
         current = p.describe_sources()
         moved = []
         if "other" in current and not s.speaker and current["other"] != speaker:
-            moved.append(f"对方 → {speaker}")
+            moved.append(f"{tr('who.other')} → {speaker}")
         if "me" in current and not s.mic and current["me"] != mic:
-            moved.append(f"我 → {mic}")
+            moved.append(f"{tr('who.me')} → {mic}")
         if moved:
             self.stop()
             self.start()
-            self._notify("已切换到新的默认设备：" + "，".join(moved))
+            self._notify(tr("devices.switched", list=", ".join(moved)))
 
     def _notify(self, text: str, secs: float = 8.0) -> None:
         self.notice = text
@@ -270,10 +274,10 @@ class Backend:
     def _load_models(self) -> None:
         s = self.settings
         try:
-            label = ENGINE_LABEL.get(s.engine, s.engine)
+            label = engine_label(s.engine)
             loaded = set(self.cache._stt)  # noqa: SLF001 - read-only peek: log only engines loaded now
             first_npu = s.engine == "npu" and not any(models.OV_CACHE_DIR.glob("*.blob"))
-            self._set_loading("首次为 NPU 优化模型（约 1 分钟，只需一次）…" if first_npu else f"加载识别模型（{label}）…")
+            self._set_loading(tr("loading.npu_first") if first_npu else tr("loading.engine", label=label))
             try:
                 self.cache.stt(s.engine)
             except Exception as e:  # noqa: BLE001 - e.g. no NPU / NPU driver missing
@@ -282,18 +286,18 @@ class Backend:
                 print(f"{label} unavailable, falling back to CPU: {e}", flush=True)
                 s.engine = "cpu"
                 s.save(self.settings_path)
-                self._notify(f"{label} 不可用，已改用 CPU 识别", secs=15)
-                self._set_loading("加载识别模型（CPU）…")
+                self._notify(tr("engine.fallback", label=label), secs=15)
+                self._set_loading(tr("loading.engine", label="CPU"))
                 self.cache.stt("cpu")
             if s.engine not in loaded:
                 print(f"speech engine {s.engine}: {self.cache.stt(s.engine).device}", flush=True)
             if s.zh:
-                self._set_loading("加载中文模型…")
+                self._set_loading(tr("loading.zh"))
                 self.cache.sensevoice()
             self.cache.vad_path()
             self.error = None
         except Exception as e:  # noqa: BLE001
-            self.error = f"模型加载失败: {e}"
+            self.error = tr("error.load", e=e)
         finally:
             self._set_loading(None)
 
@@ -311,7 +315,7 @@ class Backend:
         _cpu_percent()  # first sample, so the first [stats] line has a CPU figure
         self.pipeline = Pipeline(self.settings, self.cache, self._on_caption, self._on_level, self._on_audio)
         try:
-            self._set_loading("打开音频设备…")
+            self._set_loading(tr("loading.audio"))
             if self.record_on:
                 self._open_recorder()
             self.pipeline.start()
@@ -322,13 +326,13 @@ class Backend:
             self.pipeline.stop()
             self.pipeline = None
             self._close_recorder()
-            self.error = f"无法开始: {e}"
+            self.error = tr("error.start", e=e)
         finally:
             self._set_loading(None)
 
     def stop(self) -> None:
         if self.pipeline:
-            self._set_loading("停止中…")
+            self._set_loading(tr("loading.stopping"))
             self.pipeline.stop()  # flushes the last translations first, so they get recorded
             self._close_recorder()
             self._set_loading(None)
@@ -352,13 +356,21 @@ class Backend:
             elif not self.record_on:
                 self._close_recorder()
             return
+        if key == "api_key":  # {"provider": "deepseek" | "anthropic", "key": "..."}; "" forgets it
+            keys.save(str(value.get("provider")), value.get("key"))
+            self._key_status = keys.status()
+            if self.pipeline and self.pipeline.running:  # new key takes effect right away
+                self.pipeline.set_model(s.model, s.scene)
+            return
         if key not in {f.name for f in dataclasses.fields(Settings)}:
             return  # UI-only keys (overlay look etc.)
         setattr(s, key, value)
         s.constrained()  # a packaged edition may pin the engine / translation model
         s.save(self.settings_path)
         running = bool(self.pipeline and self.pipeline.running)
-        if key == "target":
+        if key == "ui_lang":
+            i18n.set_lang(s.ui_lang)
+        elif key == "target":
             if running:
                 self.pipeline.set_target(value)
         elif key in ("model", "scene"):
@@ -403,8 +415,9 @@ class Backend:
                         "engines": list(EDITION.engines) if EDITION.engines else None,
                         "models": list(EDITION.models) if EDITION.models else None},
             "data_dir": str(models.APP_DIR),
-            "engine": ENGINE_LABEL.get(s.engine, s.engine), "device": engine.device if engine else "",
-            "model": s.model if s.target != "off" else "翻译关闭", "target": s.target, "scene": s.scene,
+            "engine": engine_label(s.engine), "device": engine.device if engine else "",
+            "model": s.model if s.target != "off" else tr("translation.off"), "target": s.target, "scene": s.scene,
+            "ui_lang": i18n.lang(),
             "settings": dataclasses.asdict(s),
             "sources": p.describe_sources() if running else {},
             "asr_ms": st.get("asr_ms"), "mt_ms": st.get("mt_ms"),
@@ -414,6 +427,7 @@ class Backend:
             "record_secs": round(time.time() - self.recorder.started) if self.recorder else 0,
             "last_recording": self.last_recording,
             "notice": self.notice if time.time() < self._notice_until else None,
+            "keys": self._key_status,
         }
 
     def shutdown(self) -> None:

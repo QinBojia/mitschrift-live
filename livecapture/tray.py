@@ -14,12 +14,12 @@ from typing import TYPE_CHECKING
 import pystray
 from PIL import Image, ImageDraw
 
-from . import APP_NAME_ZH
+from .i18n import lang, tr
 
 if TYPE_CHECKING:
     from .app import DesktopApp
 
-TARGETS = [("中文", "zh"), ("English", "en"), ("Deutsch", "de"), ("关闭翻译", "off")]
+TARGETS = [("中文", "zh"), ("English", "en"), ("Deutsch", "de"), (None, "off")]  # None: "off" in the UI language
 
 
 def make_icon(running: bool, size: int = 64) -> Image.Image:
@@ -59,28 +59,28 @@ class Tray:
         self._icons = {False: make_icon(False), True: make_icon(True)}
         self._state: tuple | None = None
         self._stop = threading.Event()
-        self.icon = pystray.Icon("live-capture", self._icons[False], APP_NAME_ZH, self._menu())
+        self.icon = pystray.Icon("live-capture", self._icons[False], tr("app"), self._menu())
 
     # ---- menu --------------------------------------------------------------------
     def _menu(self) -> pystray.Menu:
         app, b = self.app, self.app.backend
         item = pystray.MenuItem
         return pystray.Menu(
-            item("显示主窗口", lambda: app.show_main(), default=True),  # default = left click
+            item(lambda _: tr("tray.show"), lambda: app.show_main(), default=True),  # default = left click
             pystray.Menu.SEPARATOR,
-            item(lambda _: "暂停" if self._running() else "开始", lambda: self._toggle_run(),
+            item(lambda _: tr("tray.pause") if self._running() else tr("tray.start"), lambda: self._toggle_run(),
                  enabled=lambda _: b is not None and not b.loading),
-            item("悬浮字幕", lambda: app.toggle_overlay(), checked=lambda _: app.overlay_visible),
-            item(lambda _: f"鼠标穿透（{app.hotkey}）" if app.hotkey else "鼠标穿透",
+            item(lambda _: tr("tray.overlay"), lambda: app.toggle_overlay(), checked=lambda _: app.overlay_visible),
+            item(lambda _: tr("tray.lock_hk", hk=app.hotkey) if app.hotkey else tr("tray.lock"),
                  lambda: app.set_click_through(not app.click_through), checked=lambda _: app.click_through),
-            item("译文", pystray.Menu(*[
-                item(label, self._set_target(value), radio=True,
+            item(lambda _: tr("tray.target"), pystray.Menu(*[
+                item(lambda _, s=label: s or tr("tray.target_off"), self._set_target(value), radio=True,
                      checked=lambda _, v=value: b is not None and b.settings.target == v,
                      enabled=lambda _: b is not None)
                 for label, value in TARGETS
             ])),
             pystray.Menu.SEPARATOR,
-            item(f"退出{APP_NAME_ZH}", lambda: app.quit()),
+            item(lambda _: tr("tray.quit"), lambda: app.quit()),
         )
 
     def _set_target(self, value: str):
@@ -110,20 +110,20 @@ class Tray:
             b = self.app.backend
             running = self._running()
             state = (running, self.app.overlay_visible, self.app.click_through, self.app.hotkey,
-                     b.settings.target if b else None, b.loading if b else None)
+                     b.settings.target if b else None, b.loading if b else None, lang())
             if state == self._state:
                 continue
             self._state = state
             try:
                 self.icon.icon = self._icons[running]
-                self.icon.title = f"{APP_NAME_ZH} · " + ("正在采集" if running else (b.loading if b and b.loading else "已暂停"))
+                self.icon.title = f"{tr('app')} · " + (tr("tray.running") if running else (b.loading if b and b.loading else tr("tray.paused")))
                 self.icon.update_menu()
             except Exception:  # noqa: BLE001 - icon not shown yet / shutting down
                 pass
 
     def notify(self, message: str) -> None:
         try:
-            self.icon.notify(message, APP_NAME_ZH)
+            self.icon.notify(message, tr("app"))
         except Exception:  # noqa: BLE001
             pass
 
