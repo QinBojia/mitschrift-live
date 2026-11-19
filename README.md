@@ -28,7 +28,7 @@ Pick the edition for your PC; models are included, nothing else to download:
 | Edition | For | Size |
 |---|---|---|
 | **CPU** | any 64-bit Windows 10 / 11 PC (4+ cores recommended) | ~0.65 GB |
-| **NPU** | Intel Core Ultra with an NPU; falls back to the CPU | ~1.2 GB |
+| **NPU** | Intel Core Ultra with an NPU; falls back to the CPU | ~1.7 GB |
 | **AMD** | integrated graphics through DirectML (AMD Radeon, also Intel); falls back to the CPU | ~1.7 GB |
 
 The installers are not code-signed: Windows SmartScreen asks first ("More info" → "Run

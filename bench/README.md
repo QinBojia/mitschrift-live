@@ -12,6 +12,29 @@ uv sync --extra cuda --group bench
 (Use the runtime extra that fits your machine; `dml_test.py` needs `--extra dml`,
 the NPU scripts `--extra npu`.)
 
+## Checking a change
+
+Most of what is here was written to find something out once. To check a change, three things
+are enough:
+
+- **Always:** `uv run pytest` (a few seconds). It includes the segmenter driven by a scripted
+  recognizer: forced cuts, sentence cuts, skipped passages.
+- **Segmenter, models or engine code:** one real recording with subtitles per language you
+  care about, about three minutes each:
+
+  ```bash
+  uv run python bench/subtitle_eval.py check <recording dir> <subtitles>
+  ```
+
+  It replays the recording with live timing on `cuda` and `cpu` and prints word errors
+  against the subtitles and how long the captions are, next to what the app produced when
+  the recording was made. The unquantized engines (`cuda`, `npu`, `dml`) have scored within
+  0.3 points of each other on every recording, so one of them stands for all three; add
+  `--engines npu` (or run `dml` from an environment with onnxruntime-directml) only when
+  that engine's own code or model changed. Recordings and subtitles stay out of the
+  repository.
+- **Echo or language-routing code:** `echo_eval.py` and `mixed_eval.py`.
+
 ## Test audio
 
 The test speech is synthetic (Microsoft Edge TTS) and not stored in the repository. Make it with:

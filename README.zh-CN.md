@@ -24,7 +24,7 @@ Windows 上的实时字幕和翻译。它同时听电脑里播放的声音（Zoo
 | 版本 | 适用 | 大小 |
 |---|---|---|
 | **CPU** | 任何 64 位 Windows 10 / 11 电脑（建议 4 核以上） | 约 0.65 GB |
-| **NPU** | 带 NPU 的 Intel Core Ultra；不可用时改用 CPU | 约 1.2 GB |
+| **NPU** | 带 NPU 的 Intel Core Ultra；不可用时改用 CPU | 约 1.7 GB |
 | **AMD** | 通过 DirectML 用核显（AMD Radeon，也支持 Intel）；不可用时改用 CPU | 约 1.7 GB |
 
 安装包没有代码签名，Windows SmartScreen 会先拦一下（点"更多信息"→"仍要运行"）。只装给当前用户，

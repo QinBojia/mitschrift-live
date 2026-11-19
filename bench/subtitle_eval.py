@@ -2,11 +2,16 @@
 
 Record something with the app (● Record), put its subtitles next to it, then:
 
-  python subtitle_eval.py run   <recording dir> --engine cpu     replay other.* through the real segmenter
+  python subtitle_eval.py check <recording dir> <subtitles>                   cuda + cpu, one table
+  python subtitle_eval.py check <recording dir> <subtitles> --engines npu     another engine
+  python subtitle_eval.py run   <recording dir> --engine cpu [--tag name]     only replay
   python subtitle_eval.py score <recording dir> <subtitles> cuda cpu live [--runs]
 
-`run` writes <recording dir>/eval/<engine>.txt; `score` aligns those (and "live": what the app
-wrote into captions.jsonl while recording) with the subtitle text, word by word. Times are
+`run` replays other.* through the real segmenter with the timing of live use (partial results
+every 0.5 s of audio, so captions are cut as they would be live, only faster) and writes the
+captions to <recording dir>/eval/<engine>.txt; `score` aligns those (and "live": what the app
+wrote into captions.jsonl while recording) with the subtitle text, word by word, and shows how
+long the captions are. `check` does both. Times are
 not used, so the subtitles need not be in sync, and the recording may be any part of the
 film: the stretch of subtitles it covers is found by its text (from the first to the last
 subtitle word that any listed transcript matches).
@@ -20,6 +25,7 @@ import html
 import json
 import re
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -124,11 +130,15 @@ def anchors(ops: list[tuple[str, int, int]]) -> list[int]:
     return out
 
 
-def transcript(rec: Path, name: str) -> list[str]:
+def captions(rec: Path, name: str) -> list[str]:
     if name == "live":
         lines = [json.loads(line) for line in (rec / "captions.jsonl").read_text(encoding="utf-8").splitlines()]
-        return norm_words(" ".join(c["committed"] for c in lines if c["stream"] == "other"))
-    return norm_words((rec / "eval" / f"{name}.txt").read_text(encoding="utf-8"))
+        return [c["committed"] for c in lines if c["stream"] == "other" and c["committed"]]
+    return (rec / "eval" / f"{name}.txt").read_text(encoding="utf-8").splitlines()
+
+
+def transcript(rec: Path, name: str) -> list[str]:
+    return norm_words(" ".join(captions(rec, name)))
 
 
 def score(rec: Path, subs: Path, names: list[str], show_runs: bool) -> None:
@@ -138,7 +148,8 @@ def score(rec: Path, subs: Path, names: list[str], show_runs: bool) -> None:
     matched = [i for name in names for i in anchors(align(window, transcript(rec, name)))]
     ref = window[min(matched) : max(matched) + 1]
     print(f"reference: {len(ref)} subtitle words (words {a + min(matched)}-{a + max(matched)} of {len(ref_all)})\n")
-    print(f"{'transcript':24s} {'words':>6s} {'missing':>14s} {'wrong':>13s} {'extra':>12s} {'WER':>7s}   passages of >= 5 missing words")
+    print(f"{'transcript':20s} {'words':>6s} {'missing':>14s} {'wrong':>13s} {'extra':>12s} {'WER':>7s}   "
+          f"{'missing passages':24s} captions: count, words median / 90 % / max")
     for name in names:
         hyp = transcript(rec, name)
         ops = align(ref, hyp)
@@ -152,8 +163,11 @@ def score(rec: Path, subs: Path, names: list[str], show_runs: bool) -> None:
                     runs.append(run)
                 run = []
         lost = sum(len(r) for r in runs)
-        print(f"{name:24s} {len(hyp):6d} {count['d']:6d} ({count['d'] / len(ref):5.1%}) {count['s']:5d} ({count['s'] / len(ref):5.1%}) "
-              f"{count['i']:5d} ({count['i'] / len(ref):4.1%}) {sum(count.values()) / len(ref):6.1%}   {len(runs)}, {lost} words ({lost / len(ref):.1%})")
+        sizes = sorted(len(c.split()) for c in captions(rec, name))
+        passages = f"{len(runs)}, {lost} words ({lost / len(ref):.1%})"
+        print(f"{name:20s} {len(hyp):6d} {count['d']:6d} ({count['d'] / len(ref):5.1%}) {count['s']:5d} ({count['s'] / len(ref):5.1%}) "
+              f"{count['i']:5d} ({count['i'] / len(ref):4.1%}) {sum(count.values()) / len(ref):6.1%}   {passages:24s} "
+              f"{len(sizes)}, {sizes[len(sizes) // 2]} / {sizes[int(len(sizes) * 0.9)]} / {sizes[-1]}")
         if show_runs:
             for r in runs:
                 print(f"      @{r[0]:4d} ({len(r):2d}): {' '.join(ref[r[0]:r[-1] + 1])[:150]}")
@@ -170,20 +184,25 @@ def run(rec: Path, kind: str, tag: str | None) -> None:
     engine = SttEngine(kind)
     audio, sr = sf.read(next(rec.glob("other.*")), dtype="float32")
     assert sr == SR
-    cfg = SegmenterConfig(max_segment=min(12.0, engine.max_seconds - 1.0))
+    # adaptive_factor 0: partials every 0.5 s of audio whatever this machine's speed, so a
+    # run gives the same captions every time
+    cfg = SegmenterConfig(max_segment=min(12.0, engine.max_seconds - 1.0), adaptive_factor=0.0)
     finals: list[str] = []
     proc = StreamProcessor("other", engine, SileroVad(models.ensure_silero()), cfg,
                            lambda c: finals.append(c.committed) if c.final and c.committed else None, live=False)
     proc.start()
     for i in range(0, len(audio), 1600):
         proc.feed(audio[i : i + 1600])
+        while proc._q.qsize() > 0:  # noqa: SLF001 - in step with the processing: nothing is skipped as backlog
+            time.sleep(0.0005)
     proc.stop()
     proc.join()
     (rec / "eval").mkdir(exist_ok=True)
     (rec / "eval" / f"{tag or kind}.txt").write_text("\n".join(finals), encoding="utf-8")
     mean = engine.stats()[0]
     print(f"{tag or kind}: {engine.device} | {len(audio) / sr:.0f} s | {len(finals)} captions, {sum(len(f.split()) for f in finals)} words, "
-          f"{proc.forced_cuts} forced cuts, {proc.retries} retries, {proc.restored} words restored, {engine.calls} recognitions, mean {mean:.0f} ms")
+          f"{proc.sentence_cuts} sentence cuts, {proc.forced_cuts} forced cuts, {proc.retries} retries, {proc.restored} words restored, "
+          f"{engine.calls} recognitions, mean {mean:.0f} ms")
 
 
 def main() -> None:
@@ -198,11 +217,20 @@ def main() -> None:
     s.add_argument("subs", type=Path)
     s.add_argument("names", nargs="+")
     s.add_argument("--runs", action="store_true", help="list the missing passages")
+    c = sub.add_parser("check")
+    c.add_argument("rec", type=Path)
+    c.add_argument("subs", type=Path)
+    c.add_argument("--engines", nargs="+", default=["cuda", "cpu"])
     args = ap.parse_args()
     if args.cmd == "run":
         run(args.rec, args.engine, args.tag)
-    else:
+    elif args.cmd == "score":
         score(args.rec, args.subs, args.names, args.runs)
+    else:
+        for kind in args.engines:
+            run(args.rec, kind, None)
+        live = ["live"] if (args.rec / "captions.jsonl").exists() else []
+        score(args.rec, args.subs, [*args.engines, *live], False)
 
 
 if __name__ == "__main__":
