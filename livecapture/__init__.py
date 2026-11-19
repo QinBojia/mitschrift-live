@@ -3,7 +3,7 @@
 The package keeps its original name `livecapture` (and ~/.livecapture for data) so that
 installed copies can be updated in place."""
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 APP_NAME = "Mitschrift Live"
 APP_NAME_ZH = "随堂字幕"  # what the (Chinese) interface calls the app
