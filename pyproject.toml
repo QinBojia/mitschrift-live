@@ -1,6 +1,6 @@
 [project]
 name = "mitschrift-live"
-version = "0.3.1"  # keep in step with livecapture/__init__.py
+version = "0.3.2"  # keep in step with livecapture/__init__.py
 description = "Real-time captions and translation on Windows: system audio + microphone, local speech recognition, LLM translation"
 readme = "README.md"
 license = "MIT"
