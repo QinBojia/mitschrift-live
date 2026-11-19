@@ -57,6 +57,13 @@ class Caption:
 class SegmenterConfig:
     start_threshold: float = 0.5
     end_threshold: float = 0.35
+    # Silero's recurrent state gets used to a long stretch of music or noise and then misses
+    # speech over it: after 50 s of film score the dialogue spoken over the score got p = 0.00
+    # throughout, the same audio with the state reset 5 s before it 0.7-1.0. So a second copy
+    # of the state starts afresh after every vad_reset seconds without speech (SileroVad.refresh;
+    # no false triggers on the score), next to the long-running one (resetting that one instead
+    # lost a few short sentences it did hear).
+    vad_reset: float = 3.0
     min_silence: float = 0.5  # s of non-speech that ends an utterance
     pre_roll: float = 0.3  # s of audio kept before speech onset
     post_pad: float = 0.2  # s of trailing silence kept in the final segment
@@ -286,6 +293,7 @@ class StreamProcessor(threading.Thread):
         self._preroll: deque[np.ndarray] = deque(maxlen=max(1, round(cfg.pre_roll * SR / FRAME)))
         self._utt_ids = itertools.count(1)
         self._in_speech = False
+        self._idle = 0  # frames without speech since the last one with (or the last VAD reset)
         self.forced_cuts = 0
         self.sentence_cuts = 0  # captions closed at a sentence end while the speech went on
         self.retries = 0
@@ -350,6 +358,12 @@ class StreamProcessor(threading.Thread):
             self._preroll.append(frame)
             if p >= cfg.start_threshold:
                 self._start_utterance()
+                return
+            self._idle = 0 if p >= cfg.end_threshold else self._idle + 1
+            if cfg.vad_reset and self._idle * FRAME >= cfg.vad_reset * SR:
+                if refresh := getattr(self.vad, "refresh", None):  # a plain function (tests) has none
+                    refresh()
+                self._idle = 0
             return
 
         self._buf.append(frame)
@@ -395,6 +409,7 @@ class StreamProcessor(threading.Thread):
         self._tail: list[str] = []  # normalized last committed words (for overlap removal)
         self._boundary = 0.0  # buffer-relative onset of the first uncommitted word
         self._silence = 0
+        self._idle = 0
         self._speech_frames = 1
         self._last_update = self._pos
         self._lang: str | None = None  # "zh" -> SenseVoice, None -> Parakeet

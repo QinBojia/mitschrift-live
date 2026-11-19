@@ -5,6 +5,7 @@ Record something with the app (● Record), put its subtitles next to it, then:
   python subtitle_eval.py check <recording dir> <subtitles>                   cuda + cpu, one table
   python subtitle_eval.py check <recording dir> <subtitles> --engines npu     another engine
   python subtitle_eval.py run   <recording dir> --engine cpu [--tag name]     only replay
+          [--cfg vad_reset=0 ...]                                             (with other segmenter settings)
   python subtitle_eval.py score <recording dir> <subtitles> cuda cpu live [--runs]
 
 `run` replays other.* through the real segmenter with the timing of live use (partial results
@@ -173,7 +174,7 @@ def score(rec: Path, subs: Path, names: list[str], show_runs: bool) -> None:
                 print(f"      @{r[0]:4d} ({len(r):2d}): {' '.join(ref[r[0]:r[-1] + 1])[:150]}")
 
 
-def run(rec: Path, kind: str, tag: str | None) -> None:
+def run(rec: Path, kind: str, tag: str | None, overrides: list[str] = ()) -> None:
     import soundfile as sf
 
     from livecapture import models
@@ -186,7 +187,8 @@ def run(rec: Path, kind: str, tag: str | None) -> None:
     assert sr == SR
     # adaptive_factor 0: partials every 0.5 s of audio whatever this machine's speed, so a
     # run gives the same captions every time
-    cfg = SegmenterConfig(max_segment=min(12.0, engine.max_seconds - 1.0), adaptive_factor=0.0)
+    cfg = SegmenterConfig(max_segment=min(12.0, engine.max_seconds - 1.0), adaptive_factor=0.0,
+                          **{k: float(v) for k, v in (o.split("=", 1) for o in overrides)})
     finals: list[str] = []
     proc = StreamProcessor("other", engine, SileroVad(models.ensure_silero()), cfg,
                            lambda c: finals.append(c.committed) if c.final and c.committed else None, live=False)
@@ -212,6 +214,8 @@ def main() -> None:
     r.add_argument("rec", type=Path)
     r.add_argument("--engine", default="cuda")
     r.add_argument("--tag")
+    r.add_argument("--cfg", nargs="*", default=[], metavar="KEY=VALUE",
+                   help="SegmenterConfig fields to change, e.g. vad_reset=0 (the old behaviour)")
     s = sub.add_parser("score")
     s.add_argument("rec", type=Path)
     s.add_argument("subs", type=Path)
@@ -223,7 +227,7 @@ def main() -> None:
     c.add_argument("--engines", nargs="+", default=["cuda", "cpu"])
     args = ap.parse_args()
     if args.cmd == "run":
-        run(args.rec, args.engine, args.tag)
+        run(args.rec, args.engine, args.tag, args.cfg)
     elif args.cmd == "score":
         score(args.rec, args.subs, args.names, args.runs)
     else:

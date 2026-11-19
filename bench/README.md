@@ -32,7 +32,8 @@ are enough:
   0.3 points of each other on every recording, so one of them stands for all three; add
   `--engines npu` (or run `dml` from an environment with onnxruntime-directml) only when
   that engine's own code or model changed. Recordings and subtitles stay out of the
-  repository.
+  repository. To compare a segmenter setting with its old value on the same code, replay
+  twice with `run --tag <name> --cfg <field>=<value>` and `score` both tags.
 - **Echo or language-routing code:** `echo_eval.py` and `mixed_eval.py`.
 
 ## Test audio
