@@ -12,9 +12,9 @@ repository except where noted.
 | SenseVoice Small (FunAudioLLM / Alibaba, ONNX by k2-fsa) | Chinese recognition and spoken-language ID | [FunAudioLLM/SenseVoiceSmall](https://huggingface.co/FunAudioLLM/SenseVoiceSmall), [csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17) | FunASR Model Open Source License 1.1 (not an OSI license): use, copy, modify and share allowed; credit the source and author and keep the model name. Text: `build/licenses/FunASR-MODEL_LICENSE.txt` |
 | Silero VAD (ONNX) | voice activity detection | [snakers4/silero-vad](https://github.com/snakers4/silero-vad), [istupakov/silero-vad-onnx](https://huggingface.co/istupakov/silero-vad-onnx) | MIT |
 
-Derived files made by the scripts in `bench/` (the int8 OpenVINO encoder from
-`npu_quantize.py`, the fp16 encoder from `to_fp16.py`) are conversions of the Parakeet
-model and carry its license.
+Derived files made by the scripts in `bench/` (the int8 encoder from `to_int8.py`, the fp16
+encoder from `to_fp16.py`, the int8 OpenVINO encoders from `npu_quantize.py`) are conversions
+of the Parakeet model and carry its license.
 
 ## Python packages
 

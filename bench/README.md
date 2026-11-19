@@ -38,9 +38,10 @@ English alternating), which `backend_test.py` and other end-to-end checks replay
 |---|---|
 | `parakeet_bench.py` | Latency, WER, memory and a two-stream real-time simulation for Parakeet on CUDA / CPU (fp32 / int8). Shared helpers for the other scripts. |
 | `npu_test.py` | The same on an Intel NPU or iGPU through OpenVINO, with one static input window. |
-| `npu_quantize.py` | Builds int8 OpenVINO encoders (weights-only and full post-training quantization, calibrated on `bench/audio_calib`). |
+| `npu_quantize.py` | Builds int8 OpenVINO encoders (weights-only and full post-training quantization, calibrated on `bench/audio_calib`). An experiment: the app used the full-int8 one on the NPU until 0.2.x, but on real recordings it made twice the errors of fp16. |
 | `npu_breakdown.py` | Where the time goes on the NPU path: preprocessing, encoder, decoder. |
-| `to_fp16.py` | Converts the fp32 encoder to fp16 for DirectML (keeps the length arithmetic in fp32). |
+| `to_fp16.py` | Converts the fp32 encoder to fp16 for the NPU and DirectML (keeps the length arithmetic in fp32). |
+| `to_int8.py` | Builds the CPU encoder: int8 matrix multiplications and 1x1 convolutions, the subsampling and depthwise convolutions in fp32. The ready-made int8 encoder quantizes those too and drops whole passages; numbers in the file. |
 | `dml_test.py` | Parakeet's encoder on any DirectML GPU: fp16 vs int8, dynamic length vs padded window. |
 | `slow_cpu_eval.py` | Simulates a weaker PC (few CPU threads) and checks that live captions keep up. |
 | `summarize.py` | Prints one comparison table from `bench/results/*.json`. |

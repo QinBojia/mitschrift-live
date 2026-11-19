@@ -22,10 +22,16 @@ OV_CACHE_DIR = APP_DIR / "ov_cache"
 PARAKEET_NAME = "nemo-parakeet-tdt-0.6b-v3"
 PARAKEET_REPO = "istupakov/parakeet-tdt-0.6b-v3-onnx"
 PARAKEET_DIR = MODELS_DIR / "parakeet-tdt-0.6b-v3-onnx"
-# Full-int8 encoder for the NPU, produced by bench/npu_quantize.py
-PARAKEET_OV_INT8 = MODELS_DIR / "parakeet-ov" / "encoder-int8q.xml"
-# fp16 encoder for DirectML GPUs (AMD / Intel integrated graphics), produced by bench/to_fp16.py
+# int8 encoder + decoder for CPUs, produced by bench/to_int8.py. Its encoder keeps the
+# subsampling and depthwise convolutions in fp32: the ready-made int8 encoder quantizes them
+# too and then drops whole passages (bench/to_int8.py has the numbers).
+PARAKEET_CPU_DIR = MODELS_DIR / "parakeet-cpu"
+# fp16 encoder for the Intel NPU and DirectML GPUs (AMD / Intel integrated graphics),
+# produced by bench/to_fp16.py
 PARAKEET_FP16 = PARAKEET_DIR / "encoder-model.fp16.onnx"
+# Full-int8 encoder for the NPU (bench/npu_quantize.py). No longer preferred: on real
+# recordings it made twice the errors of fp16 for 7 % less time. Installs up to 0.2.x have it.
+PARAKEET_OV_INT8 = MODELS_DIR / "parakeet-ov" / "encoder-int8q.xml"
 
 SILERO_REPO = "istupakov/silero-vad-onnx"
 SILERO_PATH = MODELS_DIR / "silero-vad" / "silero_vad.onnx"
@@ -77,6 +83,27 @@ def ensure_parakeet(quantization: str | None) -> Path:
     else:
         files = ["encoder-model.onnx", "encoder-model.onnx.data", "decoder_joint-model.onnx"]
     return _ensure(PARAKEET_REPO, PARAKEET_DIR, common + files)
+
+
+def parakeet_int8() -> tuple[Path, bool]:
+    """(folder with an int8 encoder + decoder, whether it is our own encoder from
+    bench/to_int8.py). Without that one: the ready-made int8 files, downloaded if missing."""
+    if (PARAKEET_CPU_DIR / "encoder-model.int8.onnx").exists():
+        return PARAKEET_CPU_DIR, True
+    return ensure_parakeet("int8"), False
+
+
+def npu_encoder() -> tuple[Path, str]:
+    """(encoder file for the NPU, its precision). Anything unquantized first: the NPU runs
+    fp32 files as fp16 too. The int8 IR only where nothing else is installed."""
+    fp32 = PARAKEET_DIR / "encoder-model.onnx"
+    if PARAKEET_FP16.exists():
+        return PARAKEET_FP16, "fp16"
+    if fp32.exists() and (PARAKEET_DIR / "encoder-model.onnx.data").exists():
+        return fp32, "fp16"
+    if PARAKEET_OV_INT8.exists():
+        return PARAKEET_OV_INT8, "int8"
+    return ensure_parakeet(None) / "encoder-model.onnx", "fp16"
 
 
 def ensure_sensevoice() -> Path:

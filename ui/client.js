@@ -98,7 +98,7 @@ function runDemo(store) {
   let utt = 0;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   store.apply({
-    type: "status", connected: true, running: true, engine: "NPU", device: "Intel AI Boost (int8)", model: "deepseek-flash",
+    type: "status", connected: true, running: true, engine: "NPU", device: "Intel AI Boost (fp16)", model: "deepseek-flash",
     target: "zh", scene: "a German language class", asr_ms: 152, mt_ms: 731, error: null,
     sources: { other: "Speakers (Realtek Audio)", me: "Microphone (USB Audio)" },
   });

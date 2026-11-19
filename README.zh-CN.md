@@ -64,7 +64,8 @@ API key 用 Windows DPAPI 为当前用户加密保存。
 
 - **分句器**按停顿（0.5 秒）切出一句话；说话过程中每约 0.5 秒重新识别一次（电脑慢时会自动放慢）。
   连续说话不停时，每约 9 秒强制切一次：切点前 1.5 秒以外的词定稿，最后一个定稿的词在下一段里
-  重听一遍，保证接缝处不漏字；并在定稿的词里最后一个句末标点处结束这条字幕。
+  重听一遍，保证接缝处不漏字；并在定稿的词里最后一个句末标点处结束这条字幕。如果某次识别漏掉了
+  语音检测听到的一段话，会换个方式再识别几次；上一段已经听到的词也不会丢。
 - **语种分流**：每句话的前 2.5 秒里，由 SenseVoice 的语种识别决定交给 SenseVoice（中文）还是
   Parakeet（其他语言）。
 - **主窗口**是 WebView2 里的网页，通过本机 WebSocket（随机端口 + 令牌）和 Python 后台通信。
@@ -78,10 +79,25 @@ API key 用 Windows DPAPI 为当前用户加密保存。
 | 引擎 | 硬件 | 编码器 | 10 秒一句 | CPU 占用 | 备注 |
 |---|---|---|---|---|---|
 | `cuda` | NVIDIA 显卡（RTX 5080 Laptop） | fp32 | 66 ms | 约 2% | 显存约 4 GB |
-| `npu` | Intel NPU（Core Ultra "AI Boost"） | int8，OpenVINO | 134 ms | 0.5% | 首次启动编译约 1 分钟（之后缓存）；10 秒窗口 |
+| `npu` | Intel NPU（Core Ultra "AI Boost"） | fp16，OpenVINO | 约 155 ms | 0.5% | 首次启动编译约 1 分钟（之后缓存）；10 秒窗口 |
 | `dml` | Intel 核显，4 个 Xe 核 | fp16，DirectML | 约 200 ms | 约 4% | 10 秒窗口 |
 | `dml` | AMD Radeon 780M（用户日志） | fp16，DirectML | 约 130 ms | 约 6% | |
-| `cpu` | 8 线程 | int8 | 223 ms | 约 10% | 电脑较慢时，说话过程中的刷新会变慢 |
+| `cpu` | 8 线程 | int8，不耐量化的卷积层保留 fp32 | 约 245 ms | 约 10% | 电脑较慢时，说话过程中的刷新会变慢 |
+
+量化过的编码器速度快，但曾经是准确率的短板。下面是在真实录音上的结果：一段 13 分钟的电视剧
+（有配乐、多人对话），用本程序识别后和官方字幕逐词比对。官方字幕不是逐字稿，所以绝对数值偏高，
+要看的是差距：
+
+| 编码器 | 引擎 | 词错误率 |
+|---|---|---|
+| fp32 | `cuda` | 15.3% |
+| fp16 | `npu`、`dml` | 15.2%、15.3% |
+| int8，下采样和深度卷积保留 fp32（`bench/to_int8.py`） | `cpu` | 15.9% |
+| 现成的 int8，全部量化（0.2.x 及之前的 CPU 编码器） | `cpu` | 18.3% |
+| NPU 用的全 int8（0.2.x 及之前） | `npu` | 26.2% |
+
+另外，在一段单人长时间讲话的录音里，现成的 int8 编码器有 10.5% 的 12 秒窗口只识别出不到六成的词
+（新编码器是 0.9%），表现出来就是整段话丢失。
 
 每句翻译的延迟：DeepSeek `deepseek-flash` 中位数约 0.7 秒，Claude Haiku 约 0.9 秒。
 原始数据在 `bench/results/*.json`，测法见 [`bench/README.md`](bench/README.md)。
@@ -141,14 +157,13 @@ key 也可以来自环境变量（`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`），
 | `cuda`，以及下面的转换各需一次 | Parakeet fp32（约 2.4 GB） |
 | 开启中文识别时都需要 | SenseVoice Small int8（约 0.23 GB），Silero VAD（2 MB） |
 
-有两个引擎需要先转换一次编码器，用 `bench/` 里的脚本（先 `uv sync --group bench`）：
+各引擎配上转换过的编码器效果最好，用 `bench/` 里的脚本各转换一次（先 `uv sync --group bench`；
+两个脚本都需要 fp32 模型，会自动下载）：
 
-- `npu`：全 int8 的 OpenVINO 编码器。先生成校准语音，再量化：
-  `uv run python bench/make_samples.py bench/audio_calib calib`，然后
-  `uv run python bench/npu_quantize.py`。不做这一步，NPU 会用 fp16 编码器，速度慢一些。
-- `dml`：fp16 编码器。`uv run python bench/to_fp16.py`（需要 fp32 模型：
-  `uv run python -c "from livecapture import models; models.ensure_parakeet(None)"`）。
-  不做这一步，程序会退回 CPU 识别。
+- `cpu`，以及其他引擎退回 CPU 时：`uv run python bench/to_int8.py` 生成 int8 编码器，其中不耐量化的
+  卷积层保留 fp32。不做这一步，程序会用现成的 int8 编码器，它偶尔会整段漏掉内容。
+- `npu` 和 `dml`：`uv run python bench/to_fp16.py` 生成 fp16 编码器。不做这一步，NPU 会直接用
+  fp32 文件（结果一样），`dml` 会退回 CPU 识别。
 
 ## 使用
 
@@ -208,7 +223,9 @@ key 只做了混淆，拿到安装包的人都能取出来：用一个单独的�
 
 - 只支持 Windows（WASAPI 回环录音、Win32 窗口、DirectML）。
 - 一种语言的句子里夹杂另一种语言的词（比如中文里夹德语词），常常识别不准；模型不认识的产品名会听错。
-- 两个人同时说话时，强制切分处可能丢掉几秒（int8 模型）。
+- 两个人同时说话时，仍可能丢掉几秒。
+- 0.3.0 之前安装的版本，用 `…-Update.exe` 升级后仍然使用旧的语音模型（CPU 版是现成的 int8 编码器，
+  NPU 版是全 int8）。升级包本身也有改善，但要用上更好的编码器，需要用 0.3.0 的安装包重新安装。
 - `npu` 和 `dml` 引擎用固定的 10 秒窗口，长句会被切成 10 秒以内的几段。
 - DirectML 上 int8 比 fp16 慢；而且把窗口声明成固定形状会算出错误结果（ONNX Runtime 1.24），
   所以代码改用补零。

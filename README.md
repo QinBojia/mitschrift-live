@@ -76,7 +76,9 @@ microphone ─> echo cancel ─────┘                                  
   growing utterance every ~0.5 s (less often on slow machines), and every ~9 s of speech
   without a pause makes a forced cut: words heard ≥ 1.5 s before the cut are committed, the
   last committed word is heard again in the next window so nothing falls between the pieces,
-  and the caption is closed at the last sentence end among the committed words.
+  and the caption is closed at the last sentence end among the committed words. When a
+  recognition leaves out speech that the voice detector heard, it is retried on slightly
+  different views of the audio, and words the previous window had already heard are kept.
 - **Language routing**: SenseVoice's language ID decides during the first 2.5 s of an
   utterance whether it goes to SenseVoice (Chinese) or Parakeet (everything else).
 - The **main window** is a web page in WebView2 talking to the Python backend over a local
@@ -92,10 +94,25 @@ the whole machine during a two-stream real-time simulation.
 | Engine | Runs on | Encoder | One 10 s segment | CPU use | Notes |
 |---|---|---|---|---|---|
 | `cuda` | NVIDIA GPU (RTX 5080 Laptop) | fp32 | 66 ms | ~2 % | ~4 GB VRAM |
-| `npu` | Intel NPU (Core Ultra "AI Boost") | int8, OpenVINO | 134 ms | 0.5 % | first start compiles ~1 min (cached); 10 s window |
+| `npu` | Intel NPU (Core Ultra "AI Boost") | fp16, OpenVINO | ~155 ms | 0.5 % | first start compiles ~1 min (cached); 10 s window |
 | `dml` | Intel Graphics, 4 Xe cores | fp16, DirectML | ~200 ms | ~4 % | 10 s window |
 | `dml` | AMD Radeon 780M (a user's log) | fp16, DirectML | ~130 ms | ~6 % | |
-| `cpu` | 8 threads | int8 | 223 ms | ~10 % | slower machines refresh partial results less often |
+| `cpu` | 8 threads | int8, fragile convolutions in fp32 | ~245 ms | ~10 % | slower machines refresh partial results less often |
+
+Quantized encoders are fast but were the weak spot. Accuracy on a real recording (13 minutes
+of a TV drama with music and several speakers, played through the app and scored against the
+official subtitles, which are not word-for-word, so the absolute numbers are high):
+
+| Encoder | Engine | Word error rate |
+|---|---|---|
+| fp32 | `cuda` | 15.3 % |
+| fp16 | `npu`, `dml` | 15.2 %, 15.3 % |
+| int8 with the subsampling and depthwise convolutions in fp32 (`bench/to_int8.py`) | `cpu` | 15.9 % |
+| ready-made int8, everything quantized (the CPU encoder until 0.2.x) | `cpu` | 18.3 % |
+| full int8 for the NPU (until 0.2.x) | `npu` | 26.2 % |
+
+The ready-made int8 encoder also returned fewer than 60 % of the words for 10.5 % of the 12 s
+windows of a monologue (the new one: 0.9 %), which showed as whole passages missing.
 
 Translation latency per sentence: DeepSeek `deepseek-flash` ~0.7 s median, Claude Haiku ~0.9 s.
 Raw numbers are in `bench/results/*.json`; how they were made is in [`bench/README.md`](bench/README.md).
@@ -158,15 +175,14 @@ reached (mainland China), the download switches to the hf-mirror.com mirror by i
 | `cuda`, and once for the conversions below | Parakeet fp32 (~2.4 GB) |
 | all, with Chinese on | SenseVoice Small int8 (~0.23 GB), Silero VAD (2 MB) |
 
-Two engines want a converted encoder, made once with the scripts in `bench/`
-(`uv sync --group bench` first):
+The engines work best with converted encoders, made once with the scripts in `bench/`
+(`uv sync --group bench` first; both need the fp32 model, which they download):
 
-- `npu`: full-int8 OpenVINO encoder. Generate calibration speech, then quantize:
-  `uv run python bench/make_samples.py bench/audio_calib calib`, then
-  `uv run python bench/npu_quantize.py`. Without it the NPU runs an fp16 encoder, slower.
-- `dml`: fp16 encoder. `uv run python bench/to_fp16.py` (needs the fp32 model:
-  `uv run python -c "from livecapture import models; models.ensure_parakeet(None)"`).
-  Without it the app falls back to the CPU.
+- `cpu`, and the CPU fallback of the others: `uv run python bench/to_int8.py` builds an int8
+  encoder that keeps the convolutions that don't survive quantization in fp32. Without it
+  the app uses the ready-made int8 encoder, which now and then drops whole passages.
+- `npu` and `dml`: `uv run python bench/to_fp16.py` builds the fp16 encoder. Without it the
+  NPU uses the fp32 file (same result) and `dml` falls back to the CPU.
 
 ## Using the app
 
@@ -231,7 +247,10 @@ such builds.
 - Windows only (WASAPI loopback, Win32 windows, DirectML).
 - Words of one language inside sentences of another (e.g. German words in Chinese speech)
   are often garbled; product names the model doesn't know get misheard.
-- When two people talk at once, a few seconds can be lost at a forced cut (int8 models).
+- When two people talk at once, a few seconds can still be lost.
+- A copy installed before 0.3.0 keeps its old speech models when it is updated with an
+  `…-Update.exe` (CPU: the ready-made int8 encoder, NPU: full int8). The update still helps,
+  but only a 0.3.0 installer brings the better encoders.
 - The `npu` and `dml` engines run a fixed 10 s window, so utterances are cut into ≤ 10 s pieces.
 - On DirectML, int8 is slower than fp16, and declaring the window as a static shape gives
   wrong output (ONNX Runtime 1.24); the code pads instead.

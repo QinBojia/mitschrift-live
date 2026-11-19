@@ -5,6 +5,10 @@
           bench/audio_calib (separate from the scored test clips)
 
 Usage: python npu_quantize.py [--samples 200]
+
+An experiment, no longer used by the app (0.3.0): int8q was calibrated on clean synthetic
+speech and looked lossless there, but on a real 13 min recording scored against subtitles it
+had 26 % word errors where fp16 on the same NPU had 15 %, for a ~20 % faster encoder.
 """
 
 import argparse

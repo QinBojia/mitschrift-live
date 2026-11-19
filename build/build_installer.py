@@ -20,7 +20,9 @@ Usage (from the dev venv):
   python build/build_installer.py --edition amd --friends --installer
   python build/build_installer.py --patch                      code-only update, any edition
 Installers land in BUILD_ROOT/public (public) or BUILD_ROOT (friends); the update in BUILD_ROOT.
-Bump livecapture.__version__ first; a patch only works while packages and models are unchanged.
+Bump livecapture.__version__ first. A patch carries code only: it must run with the packages
+and models of every version it may land on (0.3.0 changed the models; older installs keep
+their encoders and the code falls back to them, see models.parakeet_int8 / npu_encoder).
 """
 
 from __future__ import annotations
@@ -64,7 +66,7 @@ EDITIONS = {
     "cpu": {"engines": ["cpu"], "engine": "cpu", "packages": {}, "models": {}},
     "npu": {"engines": ["npu", "cpu"], "engine": "npu",  # falls back to CPU without a usable NPU
             "packages": {"openvino": "openvino"},
-            "models": {"parakeet-ov": ["encoder-int8q.xml", "encoder-int8q.bin"]}},
+            "models": {"parakeet-tdt-0.6b-v3-onnx": ["encoder-model.fp16.onnx"]}},  # bench/to_fp16.py
     # integrated graphics (AMD Radeon, also Intel) through DirectML; falls back to CPU.
     # onnxruntime-directml replaces onnxruntime (same module name; it also has the CPU EP).
     # An "==x" value pins a package that is not in the dev venv; None drops one.
@@ -73,8 +75,9 @@ EDITIONS = {
             "models": {"parakeet-tdt-0.6b-v3-onnx": ["encoder-model.fp16.onnx"]}},  # bench/to_fp16.py
 }
 MODEL_FILES = {
-    "parakeet-tdt-0.6b-v3-onnx": ["config.json", "vocab.txt", "nemo128.onnx",
-                                  "encoder-model.int8.onnx", "decoder_joint-model.int8.onnx"],
+    # bench/to_int8.py: int8 encoder with the fragile convolutions in fp32, int8 decoder
+    "parakeet-cpu": ["config.json", "vocab.txt", "nemo128.onnx",
+                     "encoder-model.int8.onnx", "decoder_joint-model.int8.onnx"],
     "sensevoice-small-2024-07-17": ["model.int8.onnx", "tokens.txt"],
     "silero-vad": ["silero_vad.onnx"],
 }
@@ -83,11 +86,11 @@ VC_RUNTIME = ["msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "msvcp140_atom
 MODEL_NOTICE = """Models bundled with Mitschrift Live (随堂字幕)
 =============================================
 
-NVIDIA Parakeet TDT 0.6B v3 (speech recognition, int8 ONNX export by istupakov/onnx-asr)
+NVIDIA Parakeet TDT 0.6B v3 (speech recognition, ONNX export by istupakov/onnx-asr)
   https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3  -  license: CC BY 4.0
   https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx
-  (the NPU edition's int8 OpenVINO encoder and the AMD edition's fp16 encoder are conversions
-   of the same model made for Mitschrift Live)
+  (the int8 encoder, and the fp16 encoder of the NPU and AMD editions, are conversions of
+   that export made for Mitschrift Live: bench/to_int8.py, bench/to_fp16.py)
 
 SenseVoice Small (Chinese recognition + language ID, FunAudioLLM / Alibaba, ONNX by k2-fsa)
   https://huggingface.co/FunAudioLLM/SenseVoiceSmall

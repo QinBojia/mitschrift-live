@@ -1,7 +1,7 @@
 """Mitschrift Live, command line — live captions for system audio (对方) and microphone (我).
 
   python -m livecapture                       GPU engine, system audio + mic
-  python -m livecapture --engine npu          Intel NPU (int8)
+  python -m livecapture --engine npu          Intel NPU
   python -m livecapture --sources other       system audio only
   python -m livecapture --list-devices        list audio devices
   python -m livecapture --check-devices       show input levels for 5 s (no STT)

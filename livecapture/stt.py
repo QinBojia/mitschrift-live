@@ -2,9 +2,12 @@
 (AMD / Intel integrated graphics) or the CPU.
 
 Settings come from the benchmarks in bench/: ORT thread spinning off, cuDNN heuristic
-algorithm search, int8 TDT decoder on CPU for the NPU/DirectML/CPU engines, a single static
-10 s window (full-int8 encoder) on the NPU, and an fp16 encoder fed one zero-padded 10 s
-window on DirectML (int8 is ~2.7x slower there, dynamic lengths ~3x slower).
+algorithm search, int8 TDT decoder on CPU for the NPU/DirectML/CPU engines, an fp16 encoder
+with a single static 10 s window on the NPU, and the same fp16 encoder fed one zero-padded
+10 s window on DirectML (int8 is ~2.7x slower there, dynamic lengths ~3x slower). The CPU
+encoder is int8 with the convolutions that don't survive quantization kept in fp32
+(bench/to_int8.py); quantized encoders were measured against real recordings on 2026-11-19:
+the ready-made int8 one loses whole passages, the full-int8 NPU one doubles the errors.
 """
 
 from __future__ import annotations
@@ -177,12 +180,13 @@ class SttEngine:
         elif kind == "cpu":
             # about one thread per physical core (logical/2), 2..8: leaves room for Zoom
             so.intra_op_num_threads = threads or max(2, min(8, (os.cpu_count() or 4) // 2))
+            folder, own = models.parakeet_int8()
             model = onnx_asr.load_model(
-                models.PARAKEET_NAME, models.ensure_parakeet("int8"), quantization="int8",
-                providers=cpu, sess_options=so,
+                models.PARAKEET_NAME, folder, quantization="int8", providers=cpu, sess_options=so,
             )
             self.max_seconds = 30.0
-            self.device = f"{platform.processor() or 'CPU'} (int8)"
+            # "old encoder": the ready-made int8 file of installs up to 0.2.x (drops passages)
+            self.device = f"{platform.processor() or 'CPU'} ({'int8' if own else 'int8, old encoder'})"
         elif kind == "dml":
             from . import dml
 
@@ -191,7 +195,7 @@ class SttEngine:
                 raise RuntimeError("no DirectX 12 GPU found")
             so.intra_op_num_threads = threads or 2  # preprocessor + TDT decoder only
             model = onnx_asr.load_model(
-                models.PARAKEET_NAME, models.ensure_parakeet("int8"), quantization="int8",
+                models.PARAKEET_NAME, models.parakeet_int8()[0], quantization="int8",
                 providers=cpu, sess_options=so,
             )
             self.max_seconds = 10.0
@@ -200,15 +204,14 @@ class SttEngine:
         else:  # npu
             so.intra_op_num_threads = threads or 2
             model = onnx_asr.load_model(
-                models.PARAKEET_NAME, models.ensure_parakeet("int8"), quantization="int8",
+                models.PARAKEET_NAME, models.parakeet_int8()[0], quantization="int8",
                 providers=cpu, sess_options=so,
             )
-            int8 = models.PARAKEET_OV_INT8.exists()
-            enc_path = models.PARAKEET_OV_INT8 if int8 else models.ensure_parakeet(None) / "encoder-model.onnx"
+            enc_path, precision = models.npu_encoder()
             self.max_seconds = 10.0
             enc = _OvEncoder(enc_path, "NPU", self.max_seconds)
             model.asr._encoder = enc  # noqa: SLF001 - swap the ORT CPU encoder for the NPU one
-            self.device = f"{enc.device_name} ({'int8' if int8 else 'fp16'})"
+            self.device = f"{enc.device_name} ({precision})"
 
         self._model = model.with_timestamps()
         self._lock = threading.Lock()

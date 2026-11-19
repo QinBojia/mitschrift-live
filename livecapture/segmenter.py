@@ -75,6 +75,7 @@ class SegmenterConfig:
     tail_keep: float = 1.5  # s of audio left uncommitted at a forced cut
     overlap_margin: float = 0.15  # s re-heard before the last committed word's onset
     min_advance: float = 1.0  # a forced cut must advance the buffer by at least this much
+    unheard: float = 1.5  # s of speech (VAD) in one stretch without words: the model skipped it, retry
     # Chinese routing (SenseVoice language ID; see bench/lid_eval.py)
     zh_threshold: float = 0.5  # P(zh)+P(yue) needed to route an utterance to SenseVoice
     zh_prior: float = 0.15  # threshold shifts by this toward the previous utterance's language
@@ -148,6 +149,46 @@ def _starts_late(words: list[Word], dur: float) -> bool:
     return dur >= 1.5 and (not words or words[0].start > 1.3)
 
 
+def _gaps(words: list[Word], dur: float) -> list[tuple[float, float]]:
+    """The stretches without words: gap i lies before words[i], the last one after all words."""
+    edges = [0.0, *(t for w in words for t in (w.start, w.end)), dur]
+    return list(zip(edges[::2], edges[1::2]))
+
+
+def _speech_in(speech: list[bool], a: float, b: float) -> float:
+    """Seconds of speech (the VAD's per-frame flags) between a and b, 0.3 s away from both."""
+    frame = FRAME / SR
+    i, j = int((a + 0.3) / frame), int((b - 0.3) / frame)
+    return sum(speech[i:j]) * frame if j > i else 0.0
+
+
+def unheard_speech(words: list[Word], speech: list[bool], dur: float) -> float:
+    """Most speech inside one stretch of the buffer without recognized words."""
+    return max(_speech_in(speech, a, b) for a, b in _gaps(words, dur))
+
+
+def restore_heard(words: list[Word], heard: list[Word], speech: list[bool], dur: float, need: float) -> list[Word]:
+    """Fill stretches where this pass left out >= `need` s of speech with the words the
+    previous window had heard there (`heard`, in this buffer's time) but not yet committed."""
+    if not heard:
+        return words
+    out: list[Word] = []
+    for i, (a, b) in enumerate(_gaps(words, dur)):
+        if _speech_in(speech, a, b) >= need:
+            out += [h for h in heard if h.start >= a - 0.05 and h.end <= b + 0.05]
+        out += words[i : i + 1]
+    return out
+
+
+_NOISE = np.random.default_rng(0).standard_normal(31 * SR).astype(np.float32)  # fixed: same audio, same text
+
+
+def _noisy(audio: np.ndarray, snr_db: float) -> np.ndarray:
+    """The audio with white noise `snr_db` below its own level."""
+    rms = float(np.sqrt(np.mean(audio * audio))) if len(audio) else 0.0
+    return audio + np.resize(_NOISE, len(audio)) * (rms * 10 ** (-snr_db / 20))
+
+
 def drop_overlap(words: list[Word], tail: list[str], boundary: float) -> list[Word]:
     """Remove the leading words of a re-transcribed buffer that repeat committed text.
 
@@ -215,6 +256,7 @@ class StreamProcessor(threading.Thread):
         self._in_speech = False
         self.forced_cuts = 0
         self.retries = 0
+        self.restored = 0  # words taken over from the previous window (see _words)
         self.lag = 0.0  # s between real time and processed audio (live only)
 
     # ---- producer side -------------------------------------------------
@@ -279,6 +321,7 @@ class StreamProcessor(threading.Thread):
 
         self._buf.append(frame)
         self._buf_len += FRAME
+        self._speech.append(p >= cfg.end_threshold)
         if p >= cfg.end_threshold:
             self._silence = 0
             if p >= cfg.start_threshold:
@@ -310,6 +353,8 @@ class StreamProcessor(threading.Thread):
         self._in_speech = True
         self._buf = list(self._preroll)
         self._buf_len = sum(len(f) for f in self._buf)
+        self._speech = [False] * len(self._buf)  # per buffer frame: did the VAD hear speech
+        self._heard: list[Word] = []  # words of the previous window that were not committed yet
         self._preroll.clear()
         self._utt_id = next(self._utt_ids)
         self._utt_start = self._pos - self._buf_len
@@ -351,25 +396,44 @@ class StreamProcessor(threading.Thread):
     def _words(self, audio: np.ndarray, robust: bool = False) -> list[Word]:
         """Transcribe the buffer and remove words re-heard from the previous cut.
 
-        robust: Parakeet occasionally returns nothing (or skips the first seconds) for a
-        window that starts mid-speech; the result flips with tiny shifts of the window.
-        When the text starts implausibly late, retry with a little leading silence.
+        robust: Parakeet occasionally returns nothing, skips the first seconds, a passage
+        in the middle (two people at once) or stops seconds before the speech does - mostly
+        for a window that starts mid-speech, and much more often with quantized encoders
+        (bench/to_int8.py). The result flips with tiny changes of the input, so a suspect
+        result (see _suspect) is retried on other views of the same audio: without its
+        first 0.1 s, then with faint noise. What is still missing then
+        is taken from the previous window if that one had heard it (a passage with two
+        voices was recognised in one window and skipped in the next, in every view of it).
         Used for committing transcriptions only (finals / forced cuts), not partials.
-        (Known gap: with two people talking at once the int8 models can drop a few seconds
-        that no re-try recovers - recognising the skipped head alone gave nothing either.)
+
+        Silence in front, the retry until 0.2.0, does the opposite: silence followed by
+        speech that starts mid-word made even the fp32 model lose > 40 % of the words in
+        17 of 55 healthy windows, and it recovered 6 of 23 collapsed ones (trim: 11, noise: 18).
+        (Known gap: with two people talking at once a few seconds can still be lost.)
         """
         words = self._recognize(audio).words
-        dur = len(audio) / SR
-        if robust and _starts_late(words, dur):
-            for pad in (0.2, 0.1):
-                padded = np.concatenate([np.zeros(int(pad * SR), dtype=np.float32), audio])
-                alt = [Word(w.text, w.start - pad, w.last - pad, w.space) for w in self._recognize(padded).words]
+        if robust and self._suspect(words, len(audio)):
+            for alt in self._other_views(audio):
                 if len(alt) > len(words):
                     words = alt
-                if not _starts_late(alt, dur):
+                if not self._suspect(words, len(audio)):
                     break
             self.retries += 1
+            n = len(words)
+            words = restore_heard(words, self._heard, self._speech, len(audio) / SR, self.cfg.unheard)
+            self.restored += len(words) - n
         return drop_overlap(words, self._tail, self._boundary)
+
+    def _suspect(self, words: list[Word], n: int) -> bool:
+        """Did the model skip the start, or leave out speech that the VAD heard?"""
+        dur = n / SR
+        return _starts_late(words, dur) or unheard_speech(words, self._speech, dur) >= self.cfg.unheard
+
+    def _other_views(self, audio: np.ndarray):
+        trim = 0.1  # well inside the pre-roll / the re-heard word before the first new one
+        words = self._recognize(audio[int(trim * SR) :]).words
+        yield [Word(w.text, w.start + trim, w.last + trim, w.space) for w in words]
+        yield self._recognize(_noisy(audio, 12.0)).words
 
     def _emit(self, committed: str, tentative: str, final: bool, end: int | None = None) -> None:
         """end: stream position (samples) where the caption ends; default: now."""
@@ -433,6 +497,9 @@ class StreamProcessor(threading.Thread):
         self._boundary = next_onset - cut_n / SR
         self._buf = [audio[cut_n:]]
         self._buf_len = len(audio) - cut_n
+        self._speech = self._speech[round(cut_n / FRAME) :]
+        # not its last half second: a window's final word is often a clipped one
+        self._heard = [Word(w.text, w.start - cut_n / SR, w.last - cut_n / SR, w.space) for w in rest if w.end <= dur - 0.5]
         self._last_update = self._pos
         self._emit(self._committed, words_text(rest), final=False)
 
