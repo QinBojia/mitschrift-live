@@ -2,6 +2,12 @@
 
 Used by the desktop backend (server.py). Models are expensive to load, so they live in a
 ModelCache that survives pipeline restarts (device or option changes).
+
+Either side (system audio "other", microphone "me") can be switched off and on while the
+pipeline runs (set_sources): a side that is off is not recognized, shown or recorded, and
+its device is closed - except the loopback, which stays open as the reference of the echo
+canceller while the microphone is on (with speakers, the mic would otherwise hear the
+other side and show it as "me").
 """
 
 from __future__ import annotations
@@ -24,6 +30,8 @@ from .stt import SttEngine
 from .translate import DEFAULT_SCENE, TranslationUnavailable, Translator, make_backend
 from .vad import SileroVad
 
+STREAMS = ("other", "me")  # system audio (loopback), microphone
+
 
 @dataclass
 class Settings:
@@ -44,7 +52,7 @@ class Settings:
     # interface language: auto (follow Windows) | zh | en; default from the edition (friends: zh)
     ui_lang: str = field(default_factory=lambda: EDITION.default_ui_lang)
 
-    RESTART_KEYS = ("engine", "aec", "echo_filter", "zh", "speaker", "mic", "sources", "min_silence",
+    RESTART_KEYS = ("engine", "aec", "echo_filter", "zh", "speaker", "mic", "min_silence",
                     "file", "file_me", "speed")
 
     @classmethod
@@ -62,6 +70,7 @@ class Settings:
             self.engine = EDITION.engine or EDITION.engines[0]
         if EDITION.models and self.model not in EDITION.models:
             self.model = EDITION.default_model or EDITION.models[0]
+        self.sources = [k for k in STREAMS if k in (self.sources or [])]
         return self
 
     def save(self, path: Path) -> None:
@@ -113,84 +122,150 @@ class Pipeline:
         self.engine: SttEngine | None = None
         self.translator: Translator | None = None
         self.echo_filter: EchoFilter | None = None
-        self.sources: dict = {}
-        self.procs: dict[str, StreamProcessor] = {}
+        self.sources: dict = {}  # open devices (or files) by stream
+        self.procs: dict[str, StreamProcessor] = {}  # the sides that are on: recognized, shown, recorded
         self._system: AudioSystem | None = None
+        self._aec: EchoCanceller | None = None
+        self._lock = threading.Lock()  # start / stop / set_sources
+        self._live = True
         self.running = False
 
     # ---- lifecycle -----------------------------------------------------------
     def start(self) -> None:
         s = self.settings
         self.engine = self.cache.stt(s.engine)
-        sv = self.cache.sensevoice() if s.zh else None
-        vad_path = self.cache.vad_path()
-
-        live = not s.file
-        if live:
-            self._system = AudioSystem()
-            self.sources = {}
-            if "other" in s.sources:
-                self.sources["other"] = LiveSource(self._system, "loopback", s.speaker or None)
-            if "me" in s.sources:
-                self.sources["me"] = LiveSource(self._system, "mic", s.mic or None)
-        else:
-            self.sources = {"other": FileSource(s.file, s.speed)}
-            if s.file_me:
-                self.sources["me"] = FileSource(s.file_me, s.speed)
+        self._sv = self.cache.sensevoice() if s.zh else None
+        self._vad_path = self.cache.vad_path()
+        self._live = not s.file
+        self._cfg = SegmenterConfig(min_silence=s.min_silence, max_segment=min(12.0, self.engine.max_seconds - 1.0))
 
         self.translator = Translator(self.on_caption, _NoBackend(), s.target if s.target else "off")
         self.set_model(s.model, s.scene)
+        # hides a mic caption that repeats the other side: idle while only one side is on
+        self.echo_filter = EchoFilter(self.translator.on_caption) if s.echo_filter else None
+        self._first = self.echo_filter.on_caption if self.echo_filter else self.translator.on_caption
 
-        both = "other" in self.sources and "me" in self.sources
-        aec = EchoCanceller() if both and s.aec else None
-        self.echo_filter = EchoFilter(self.translator.on_caption) if both and s.echo_filter else None
-        first = self.echo_filter.on_caption if self.echo_filter else self.translator.on_caption
+        with self._lock:
+            self.running = True
+            if self._live:
+                self._system = AudioSystem()
+                self.sources = {}
+                self._apply(set(s.sources))
+            else:  # replay: the files decide which sides there are
+                self.sources = {"other": FileSource(s.file, s.speed)}
+                if s.file_me:
+                    self.sources["me"] = FileSource(s.file_me, s.speed)
+                self._aec = EchoCanceller() if len(self.sources) == 2 and s.aec else None
+                for k in self.sources:
+                    self._add_proc(k)
+                for k, src in self.sources.items():
+                    src.start(self._feeds[k])
 
-        cfg = SegmenterConfig(min_silence=s.min_silence, max_segment=min(12.0, self.engine.max_seconds - 1.0))
-        cfgs = {k: cfg for k in self.sources}
-        if aec:  # double-talk leaves dips in the cleaned mic signal (bench/echo_eval.py)
-            cfgs["me"] = dataclasses.replace(cfg, min_silence=max(cfg.min_silence, 0.8))
-        self.procs = {
-            k: StreamProcessor(k, self.engine, SileroVad(vad_path), cfgs[k], first, live=live,
-                               on_level=self.on_level, on_audio=self.on_audio, sensevoice=sv)
-            for k in self.sources
-        }
-        for p in self.procs.values():
-            p.start()
-        feeds = {k: self.procs[k].feed for k in self.sources}
+    def set_sources(self, enabled: list[str]) -> None:
+        """Switch sides on or off while running (live capture; a replay keeps its files)."""
+        with self._lock:
+            if self.running and self._live:
+                self._apply(set(enabled))
+
+    def _apply(self, want: set[str]) -> None:
+        """Bring processors and devices in line with the sides that should be on."""
+        s = self.settings
+        mic = "me" in want
+        # the loopback is also the reference of the echo canceller for the microphone
+        need = {"other": "other" in want or (mic and s.aec), "me": mic}
+        for k in [k for k in self.procs if k not in want]:
+            self._drop_proc(k)  # what it was hearing still comes out as a last caption
+        for k in [k for k in self.sources if not need[k]]:
+            self._close_source(k)
+        if not mic:
+            self._aec = None
+        elif s.aec and self._aec is None:
+            self._aec = EchoCanceller()
+        for k in STREAMS:
+            if k in want and k not in self.procs:
+                self._add_proc(k)
+        failed = None
+        for k, kind, device in (("other", "loopback", s.speaker), ("me", "mic", s.mic)):
+            if need[k] and k not in self.sources:
+                try:
+                    src = LiveSource(self._system, kind, device or None)
+                    src.start(self._feeds[k])
+                    self.sources[k] = src
+                except Exception as e:  # noqa: BLE001 - e.g. no microphone: the other side still runs
+                    self._drop_proc(k)
+                    failed = failed or e
+        if failed:
+            raise failed
+
+    def _add_proc(self, k: str) -> None:
+        cfg = self._cfg
+        if k == "me" and self._aec:  # double-talk leaves dips in the cleaned mic signal (bench/echo_eval.py)
+            cfg = dataclasses.replace(cfg, min_silence=max(cfg.min_silence, 0.8))
+        p = StreamProcessor(k, self.engine, SileroVad(self._vad_path), cfg, self._first, live=self._live,
+                            on_level=self.on_level, sensevoice=self._sv)
+        p.start()
+        self.procs[k] = p
+
+    def _drop_proc(self, k: str) -> None:
+        p = self.procs.pop(k, None)
+        if p:
+            p.stop()
+            p.join(timeout=10)
+
+    def _close_source(self, k: str) -> None:
+        src = self.sources.pop(k, None)
+        try:
+            if src:
+                src.stop()
+        except Exception:  # noqa: BLE001 - device may already be gone
+            pass
+
+    # ---- audio in (capture threads) --------------------------------------------
+    @property
+    def _feeds(self) -> dict:
+        return {"other": self._feed_other, "me": self._feed_me}
+
+    def _feed_other(self, block) -> None:
+        aec = self._aec
         if aec:
-            other_feed, me_feed = feeds["other"], feeds["me"]
+            aec.push_reference(block)
+        self._deliver("other", block)
 
-            def feed_other(block, _f=other_feed) -> None:
-                aec.push_reference(block)
-                _f(block)
+    def _feed_me(self, block) -> None:
+        aec = self._aec
+        if aec:
+            block = aec.process_capture(block)
+            if not len(block):
+                return
+        self._deliver("me", block)
 
-            def feed_me(block, _f=me_feed) -> None:
-                cleaned = aec.process_capture(block)
-                if len(cleaned):
-                    _f(cleaned)
-
-            feeds = {"other": feed_other, "me": feed_me}
-        for k, src in self.sources.items():
-            src.start(feeds[k])
-        self.running = True
+    def _deliver(self, k: str, block) -> None:
+        p = self.procs.get(k)
+        if p is None:  # this side is off (the loopback may still run as the echo reference)
+            return
+        if self.on_audio:  # the recorder: here, at capture time, not when the recognizer gets to it
+            self.on_audio(k, block)
+        p.feed(block)
 
     def stop(self) -> None:
-        for src in self.sources.values():
-            try:
-                src.stop()
-            except Exception:  # noqa: BLE001 - device may already be gone
-                pass
-        for p in self.procs.values():
-            p.stop()
-        for p in self.procs.values():
-            p.join(timeout=10)
+        with self._lock:
+            for src in self.sources.values():
+                try:
+                    src.stop()
+                except Exception:  # noqa: BLE001 - device may already be gone
+                    pass
+            procs = list(self.procs.values())
+            for p in procs:
+                p.stop()
+            for p in procs:
+                p.join(timeout=10)
+            self._aec = None
+            self.running = False
         if self.translator:
             self.translator.flush(8)
         if self._system:
             self._system.close()
             self._system = None
-        self.running = False
 
     @property
     def files_done(self) -> bool:
@@ -232,5 +307,5 @@ class Pipeline:
             "zh_calls": sv.calls if sv else 0,
             "mt_ms": round(mt[0]) if mt else None,
             "mt_error": self.translator.error if self.translator else None,
-            "lag": max((p.lag for p in self.procs.values()), default=0.0),
+            "lag": max((p.lag for p in list(self.procs.values())), default=0.0),
         }

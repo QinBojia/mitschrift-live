@@ -20,6 +20,10 @@ function highlight(text) {
   return safe.replace(new RegExp(q, "gi"), (m) => `<mark>${m}</mark>`);
 }
 
+// the microphone alone listens to the room (a lecture): shown like the other side, not as "me"
+const sideOf = (e) => (e.who === "room" ? "other" : e.stream);
+const whoOf = (e) => t(e.who === "room" ? "who.room" : `who.${e.stream}`);
+
 function render(e) {
   let el = nodes.get(e.key);
   if (!el) {
@@ -28,20 +32,20 @@ function render(e) {
       <div class="bubble"><div class="orig"></div><div class="trans"></div></div>`;
     // group with the previous bubble when the same person keeps talking (within a minute)
     const prev = [...nodes.values()].at(-1);
-    el.dataset.cont = prev && prev.dataset.stream === e.stream && e.start - Number(prev.dataset.start) < 60 ? "1" : "";
-    el.dataset.stream = e.stream;
+    el.dataset.cont = prev && prev.dataset.stream === sideOf(e) && e.start - Number(prev.dataset.start) < 60 ? "1" : "";
+    el.dataset.stream = sideOf(e);
     el.dataset.start = e.start;
     nodes.set(e.key, el);
     list.appendChild(el);
     $("empty").style.display = "none";
   }
   const live = !e.final && e.translation !== PENDING;
-  el.className = `entry ${e.stream}` + (el.dataset.cont ? " cont" : "") + (live ? " live" : "")
+  el.className = `entry ${sideOf(e)}` + (el.dataset.cont ? " cont" : "") + (live ? " live" : "")
     + (e.final && !e.translation ? " notr" : "");
   el.querySelector(".t").textContent = fmtTime(e.start);
   const who = el.querySelector(".who");
-  who.textContent = t(`who.${e.stream}`);
-  who.className = `who ${e.stream}`;
+  who.textContent = whoOf(e);
+  who.className = `who ${sideOf(e)}`;
   el.querySelector(".lang").textContent = e.src ? t(`lang.${e.src}`) : "";
   const orig = el.querySelector(".orig");
   const sep = e.committed && e.tentative && joinText(e.committed, e.tentative) !== e.committed + e.tentative ? " " : "";
@@ -102,8 +106,12 @@ function renderStatus() {
   $("run").disabled = !s.connected || !!s.loading;
   $("run").title = s.connected ? (s.loading ?? "") : t("run.offline");
   for (const b of $("target").children) b.classList.toggle("on", b.dataset.v === s.target);
-  $("dev-other").textContent = s.sources?.other ?? "";
-  $("dev-me").textContent = s.sources?.me ?? "";
+  const on = s.settings?.sources ?? ["other", "me"];  // the sides that are switched on
+  for (const k of ["other", "me"]) {
+    $(`src-${k}`).classList.toggle("off", !on.includes(k));
+    $(`dev-${k}`).textContent = on.includes(k) ? (s.sources?.[k] ?? "") : t("src.off");
+  }
+  $("who-me").textContent = t(on.includes("me") && !on.includes("other") ? "who.room" : "who.me");
   const lag = s.lag > 1 ? t("stats.lag", { s: s.lag }) : "";
   // recording: armed (records on next start) vs. live (writing now, with a timer)
   const rec = $("rec");
@@ -117,7 +125,8 @@ function renderStatus() {
     ? `<span>${escapeHtml(s.loading)}</span>`
     : s.error
       ? `<span class="error">${escapeHtml(s.error)}</span>`
-      : (s.notice ? `<span class="notice">${escapeHtml(s.notice)}</span>` : "") +
+      : (on.length ? "" : `<span class="notice">${t("src.none")}</span>`) +
+        (s.notice ? `<span class="notice">${escapeHtml(s.notice)}</span>` : "") +
         `<span>${t("stats.asr", { engine: escapeHtml(s.engine), ms: s.asr_ms ?? "-" })}</span>` +
         `<span>${escapeHtml(s.model)}${s.target === "off" ? "" : t("stats.mt", { ms: s.mt_ms ?? "-" })}${lag}</span>`;
   if (s.settings) applySettings(s.settings);
@@ -202,6 +211,16 @@ $("run").onclick = () => send({ type: "control", action: store.status.running ? 
 $("rec").onclick = () => send({ type: "set", key: "record", value: !store.status.record_on });
 $("openRec").onclick = () => api()?.open_recordings?.(store.status.last_recording);
 $("target").onclick = (ev) => ev.target.dataset.v && send({ type: "set", key: "target", value: ev.target.dataset.v });
+// the two sides in the status bar are switches: system audio / microphone on or off, while running
+for (const k of ["other", "me"]) {
+  const toggle = () => {
+    const on = new Set(store.status.settings?.sources ?? ["other", "me"]);
+    if (!on.delete(k)) on.add(k);
+    send({ type: "set", key: "sources", value: ["other", "me"].filter((x) => on.has(x)) });
+  };
+  $(`src-${k}`).onclick = toggle;
+  $(`src-${k}`).onkeydown = (ev) => (ev.key === "Enter" || ev.key === " ") && toggle();
+}
 
 /* ---------------------------------------------------------------- overlay / settings */
 
@@ -228,12 +247,14 @@ for (const [id, key] of [["set-engine", "engine"], ["set-model", "model"], ["set
 $("set-font").oninput = (ev) => api()?.set_bar_pref?.("font", Number(ev.target.value));
 $("set-text-alpha").oninput = (ev) => api()?.set_bar_pref?.("text_alpha", Number(ev.target.value) / 100);
 $("set-bg-alpha").oninput = (ev) => api()?.set_bar_pref?.("bg_alpha", Number(ev.target.value) / 100);
+$("set-bar-show").onchange = (ev) => api()?.set_bar_pref?.("show", ev.target.value);
 // desktop shell -> page: the bar's look changed (A−/A+ on the bar itself) or on load
 window.__setBarPrefs = (p) => {
   const set = (id, v) => { const el = $(id); if (el && document.activeElement !== el) el.value = v; };
   set("set-font", p.font);
   set("set-text-alpha", Math.round(p.text_alpha * 100));
   set("set-bg-alpha", Math.round(p.bg_alpha * 100));
+  set("set-bar-show", p.show ?? "both");
 };
 let hotkey = null;  // the global hotkey the desktop shell managed to register
 function showHotkey() {
@@ -260,9 +281,9 @@ function exportAs(fmt) {
   if (fmt === "srt") {
     out = done.map((e, i) => `${i + 1}\n${srtTime(e.start)} --> ${srtTime(e.end ?? e.start + 3)}\n${e.committed}${e.translation ? "\n" + e.translation : ""}\n`).join("\n");
   } else if (fmt === "md") {
-    out = "# 随堂字幕 Mitschrift Live\n\n" + done.map((e) => `**${fmtTime(e.start)} ${t(`who.${e.stream}`)}** ${e.committed}${e.translation ? `  \n> ${e.translation}` : ""}\n`).join("\n");
+    out = "# 随堂字幕 Mitschrift Live\n\n" + done.map((e) => `**${fmtTime(e.start)} ${whoOf(e)}** ${e.committed}${e.translation ? `  \n> ${e.translation}` : ""}\n`).join("\n");
   } else {
-    out = done.map((e) => `[${fmtTime(e.start)}] ${t(`who.${e.stream}`)}: ${e.committed}${e.translation ? `\n    → ${e.translation}` : ""}`).join("\n");
+    out = done.map((e) => `[${fmtTime(e.start)}] ${whoOf(e)}: ${e.committed}${e.translation ? `\n    → ${e.translation}` : ""}`).join("\n");
   }
   if (api()?.save_text) return api().save_text(out, fmt);
   const a = document.createElement("a");

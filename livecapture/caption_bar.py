@@ -136,11 +136,34 @@ WHO_COLOR = {"other": (0x5E, 0xE0, 0xD4), "me": (0x9B, 0xE2, 0x7B)}
 ACCENT = (0x6E, 0xA8, 0xFF)
 WHITE = (255, 255, 255)
 HOVER_BG_FLOOR = 0.3  # under the mouse the panel shows at least this much, to see where to drag
-TOOLS = [("smaller", "A−"), ("bigger", "A+"), ("tr", "bar.tr"), ("lock", "bar.lock"), ("close", "×")]  # i18n keys or text
+TOOLS = [("smaller", "A−"), ("bigger", "A+"), ("tr", ""), ("lock", "bar.lock"), ("close", "×")]  # i18n keys or text ("tr": the display mode)
 NO_LINE_START = set("，。、？！：；,.?!:;…）)」』”’")
 SHOW = 2  # newest captions on screen
 MIN_FRAME_S = 0.12  # caption updates are drawn at most ~8 times a second (a frame costs ~25 ms)
-DEFAULTS = {"font": 26, "text_alpha": 1.0, "bg_alpha": 1.0, "translation": True}
+SHOW_MODES = ("both", "original", "translation")  # what a caption shows; the bar button cycles through them
+DEFAULTS = {"font": 26, "text_alpha": 1.0, "bg_alpha": 1.0, "show": "both"}
+
+
+def entry_lines(e: dict, mode: str) -> tuple[list[tuple[str, float]], tuple[str, float] | None]:
+    """What one caption shows in a display mode: the main line as (text, opacity) runs, and
+    the smaller translation line as (text, opacity), or None.
+
+    "translation": the translation takes the place of the original. Until it is there the
+    original stands in, dimmed, so the bar is never empty while someone speaks; a finished
+    caption that gets no translation (translation off, no key, already in the target
+    language) keeps its original at full strength.
+    """
+    committed, tentative = e.get("committed", ""), e.get("tentative", "")
+    sep = " " if committed and tentative and join_text(committed, tentative) != committed + tentative else ""
+    tr_text = e.get("translation")
+    pending = tr_text == PENDING
+    if mode == "translation" and tr_text and not pending:
+        return [(tr_text, 1.0)], None
+    k = 0.6 if mode == "translation" and (pending or not e.get("final")) else 1.0
+    main = [(committed, k), (sep + tentative, 0.55 * k)]
+    if mode == "both" and tr_text:
+        return main, ((tr("bar.pending"), 0.6) if pending else (tr_text, 1.0))
+    return main, None
 
 
 @functools.lru_cache(maxsize=64)
@@ -241,18 +264,16 @@ def render(w: int, h: int, scale: float, entries: list[dict], prefs: dict, *, ho
         old = i < len(entries) - 1
         parts = []  # (font, line height, lines)
         fw = _font(px(11), False)
-        parts.append((fw, round(px(11) * 1.25), [[(0.0, tr(f"who.{e['stream']}"), WHO_COLOR.get(e["stream"], WHITE), 1.0)]]))
-        committed, tentative = e.get("committed", ""), e.get("tentative", "")
-        sep = " " if committed and tentative and join_text(committed, tentative) != committed + tentative else ""
+        room = e.get("who") == "room"  # the microphone alone: it hears the room, not "me"
+        who, who_color = (tr("who.room"), WHO_COLOR["other"]) if room else (tr(f"who.{e['stream']}"), WHO_COLOR.get(e["stream"], WHITE))
+        parts.append((fw, round(px(11) * 1.25), [[(0.0, who, who_color, 1.0)]]))
+        main, line = entry_lines(e, prefs["show"])
         fo = _font(px(fs * (0.78 if old else 1.0)), True)
-        runs = [(committed, WHITE, 1.0), (sep + tentative, WHITE, 0.55)]
-        parts.append((fo, round(fo.size * 1.35), _wrap(runs, fo, width)))
-        tr_text = e.get("translation")
-        if prefs["translation"] and tr_text:
-            pending = tr_text == PENDING
+        parts.append((fo, round(fo.size * 1.35), _wrap([(s, WHITE, a) for s, a in main], fo, width)))
+        if line:
+            pending = e.get("translation") == PENDING
             ft = _font(px(fs * (0.62 if pending else 0.66 if old else 0.8)), False)
-            runs = [(tr("bar.pending") if pending else tr_text, WHITE, 0.6 if pending else 1.0)]
-            parts.append((ft, round(ft.size * 1.4), _wrap(runs, ft, width)))
+            parts.append((ft, round(ft.size * 1.4), _wrap([(line[0], WHITE, line[1])], ft, width)))
         height = sum(lh * len(lines) for _, lh, lines in parts) + px(2)
 
         def draw(y, parts=parts):
@@ -278,12 +299,15 @@ def render(w: int, h: int, scale: float, entries: list[dict], prefs: dict, *, ho
         asc, desc = f.getmetrics()
         x = w - px(8)
         for name, label in reversed(TOOLS):
-            label = tr(label) if label.startswith("bar.") else label
+            if name == "tr":  # shows the current display mode; a click moves on to the next
+                label = tr(f"bar.show.{prefs['show']}")
+            else:
+                label = tr(label) if label.startswith("bar.") else label
             bw = round(f.getlength(label)) + px(14)
             bh = asc + desc + px(8)
             rect = (x - bw, px(6), x, px(6) + bh)
             rects[name] = rect
-            on = name == "tr" and prefs["translation"]
+            on = name == "tr"
             if name == hot:
                 tools.box(rect, px(6), WHITE, 0.10)
             color, a = (ACCENT, 1.0) if on else (WHITE, 1.0 if name == hot else 0.5)
@@ -356,11 +380,15 @@ def _background(w: int, h: int, r: int, alpha: int, locked: bool) -> np.ndarray:
 class CaptionBar:
     def __init__(self, prefs: dict, geometry: dict | None, on_prefs: Callable[[dict, dict], None],
                  on_command: Callable[[str], None]):
-        """prefs: font / text_alpha / bg_alpha / translation; geometry: x y w h in physical px.
+        """prefs: font / text_alpha / bg_alpha / show; geometry: x y w h in physical px.
 
         on_prefs(prefs, geometry) after any change (to save them); on_command("lock" | "hide").
         """
+        if "show" not in prefs and prefs.get("translation") is False:  # saved by 0.3.0 and earlier
+            prefs = {**prefs, "show": "original"}
         self.prefs = {**DEFAULTS, **{k: v for k, v in prefs.items() if k in DEFAULTS}}
+        if self.prefs["show"] not in SHOW_MODES:
+            self.prefs["show"] = "both"
         self.geometry = geometry
         self._on_prefs, self._on_command = on_prefs, on_command
         self._lock = threading.Lock()
@@ -408,8 +436,9 @@ class CaptionBar:
             value = max(0.2, min(1.0, float(value)))
         elif key == "bg_alpha":
             value = max(0.0, min(1.0, float(value)))
-        elif key == "translation":
-            value = bool(value)
+        elif key == "show":
+            if value not in SHOW_MODES:
+                return
         else:
             return
         with self._lock:
@@ -651,7 +680,7 @@ class CaptionBar:
         elif name == "bigger":
             self.set_pref("font", self.prefs["font"] + 2)
         elif name == "tr":
-            self.set_pref("translation", not self.prefs["translation"])
+            self.set_pref("show", SHOW_MODES[(SHOW_MODES.index(self.prefs["show"]) + 1) % len(SHOW_MODES)])
         elif name == "lock":
             self._on_command("lock")
         elif name == "close":

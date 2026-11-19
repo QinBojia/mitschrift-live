@@ -98,7 +98,7 @@ class Api:
         return self._app.set_click_through(bool(on))
 
     def set_bar_pref(self, key: str, value) -> None:
-        """Caption bar look: font (px), text_alpha / bg_alpha (0..1), translation (bool)."""
+        """Caption bar look: font (px), text_alpha / bg_alpha (0..1), show (both | original | translation)."""
         self._app.bar.set_pref(str(key), value)
 
     def get_bar_prefs(self) -> dict:

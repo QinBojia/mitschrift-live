@@ -42,7 +42,8 @@ For translation, open the app, click ⚙ → Translation and paste a
 ## Features
 
 - **Two sources, kept apart.** System audio via WASAPI loopback ("Them") and your
-  microphone ("Me").
+  microphone ("Me"). Either one can be switched off and on while capturing: no microphone
+  while you watch a video, or the microphone alone for a lecture in the room.
 - **Local speech recognition.** NVIDIA Parakeet TDT 0.6B v3 (German, English and 23 more
   European languages) on an NVIDIA GPU, an Intel NPU, AMD / Intel integrated graphics
   (DirectML) or the CPU. Chinese is detected per utterance and transcribed by SenseVoice Small.
@@ -191,8 +192,15 @@ The engines work best with converted encoders, made once with the scripts in `be
 ## Using the app
 
 - **Start / Pause**; **中文 / English / Deutsch / Off**: translation target.
+- **Them / Me** in the status line are switches (also in the tray menu): click one to stop
+  listening to system audio or to the microphone. A side that is off is not recognized,
+  shown or recorded, and comes back at once when switched on again. With only the
+  microphone on, its captions are labelled *Room*. (With echo cancellation on, system
+  audio is still picked up as the reference for the microphone, but not transcribed.)
 - **Caption bar**: show / hide it. Drag it by its body, resize it at its edges; its buttons
-  (A− A+, translation, click-through, ×) appear on hover.
+  (A− A+, what to show, click-through, ×) appear on hover. It can show original and
+  translation, the original only, or the translation only (the original then stands in,
+  dimmed, until its translation arrives).
 - **Click-through**: clicks go to the window below. Turn it off with **Ctrl+Alt+L**
   (falls back to Ctrl+Alt+C or Ctrl+Alt+F12 if taken; the settings show which).
 - **⚙ Settings**: interface language, devices (default: follow Windows), echo cancellation,

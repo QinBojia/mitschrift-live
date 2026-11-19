@@ -73,6 +73,11 @@ class Tray:
             item(lambda _: tr("tray.overlay"), lambda: app.toggle_overlay(), checked=lambda _: app.overlay_visible),
             item(lambda _: tr("tray.lock_hk", hk=app.hotkey) if app.hotkey else tr("tray.lock"),
                  lambda: app.set_click_through(not app.click_through), checked=lambda _: app.click_through),
+            pystray.Menu.SEPARATOR,
+            item(lambda _: tr("tray.src_other"), self._toggle_source("other"),
+                 checked=lambda _: self._source_on("other"), enabled=lambda _: b is not None),
+            item(lambda _: tr("tray.src_me"), self._toggle_source("me"),
+                 checked=lambda _: self._source_on("me"), enabled=lambda _: b is not None),
             item(lambda _: tr("tray.target"), pystray.Menu(*[
                 item(lambda _, s=label: s or tr("tray.target_off"), self._set_target(value), radio=True,
                      checked=lambda _, v=value: b is not None and b.settings.target == v,
@@ -85,6 +90,18 @@ class Tray:
 
     def _set_target(self, value: str):
         return lambda: self.app.backend and self.app.backend.request_set("target", value)
+
+    def _source_on(self, k: str) -> bool:
+        b = self.app.backend
+        return bool(b and k in b.settings.sources)
+
+    def _toggle_source(self, k: str):
+        def toggle() -> None:
+            b = self.app.backend
+            if b:
+                on = set(b.settings.sources) ^ {k}
+                b.request_set("sources", [s for s in ("other", "me") if s in on])
+        return toggle
 
     def _running(self) -> bool:
         b = self.app.backend
@@ -110,7 +127,8 @@ class Tray:
             b = self.app.backend
             running = self._running()
             state = (running, self.app.overlay_visible, self.app.click_through, self.app.hotkey,
-                     b.settings.target if b else None, b.loading if b else None, lang())
+                     b.settings.target if b else None, b.loading if b else None, lang(),
+                     tuple(b.settings.sources) if b else None)
             if state == self._state:
                 continue
             self._state = state

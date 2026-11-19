@@ -25,6 +25,12 @@
   }
   .src { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .src .dev { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
+  /* each side is a switch: click to stop / resume listening to it */
+  .src[role=button] { cursor: pointer; padding: 3px 8px; margin: -3px -8px; border-radius: 8px; user-select: none; }
+  .src[role=button]:hover { background: color-mix(in srgb, var(--text-3) 16%, transparent); }
+  .src.off .who { opacity: .5; text-decoration: line-through; }
+  .src.off .dev { opacity: .6; }
+  .src.off .meter { visibility: hidden; }
   .stats { margin-left: auto; display: flex; gap: 12px; color: var(--text-3); }
   .stats b { color: var(--text-2); font-weight: 600; }
   .error { color: var(--err); font-weight: 600; }
@@ -117,8 +123,8 @@
 </header>
 
 <div class="status">
-  <div class="src"><span class="who other" data-i18n="who.other">对方</span><div class="meter other"><i id="lv-other"></i></div><span class="dev" id="dev-other"></span></div>
-  <div class="src"><span class="who me" data-i18n="who.me">我</span><div class="meter me"><i id="lv-me"></i></div><span class="dev" id="dev-me"></span></div>
+  <div class="src" id="src-other" role="button" tabindex="0" data-i18n-title="src.title"><span class="who other" data-i18n="who.other">对方</span><div class="meter other"><i id="lv-other"></i></div><span class="dev" id="dev-other"></span></div>
+  <div class="src" id="src-me" role="button" tabindex="0" data-i18n-title="src.title"><span class="who me" id="who-me" data-i18n="who.me">我</span><div class="meter me"><i id="lv-me"></i></div><span class="dev" id="dev-me"></span></div>
   <div class="stats" id="stats"></div>
 </div>
 
@@ -165,6 +171,9 @@
   <label class="field"><span data-i18n="scene">场景</span><input id="set-scene" value="a German language class"></label>
   <p class="hint" data-i18n="scene.hint"></p>
   <h3 data-i18n="sec.bar">悬浮字幕</h3>
+  <label class="field"><span data-i18n="bar.show">显示内容</span>
+    <select id="set-bar-show"><option value="both" data-i18n="bar.show.both"></option><option value="original" data-i18n="bar.show.original"></option><option value="translation" data-i18n="bar.show.translation"></option></select></label>
+  <p class="hint" data-i18n="bar.show.hint"></p>
   <label class="field"><span data-i18n="bar.font">字号</span><input id="set-font" type="range" min="16" max="48" value="26"></label>
   <label class="field"><span data-i18n="bar.text">文字不透明度</span><input id="set-text-alpha" type="range" min="20" max="100" value="100"></label>
   <label class="field"><span data-i18n="bar.bg">背景不透明度</span><input id="set-bg-alpha" type="range" min="0" max="100" value="100"></label>

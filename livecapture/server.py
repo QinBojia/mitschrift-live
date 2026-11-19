@@ -27,7 +27,7 @@ from . import __version__, i18n, keys, models
 from .i18n import tr
 from .audio import AudioSystem
 from .edition import EDITION
-from .pipeline import ModelCache, Pipeline, Settings
+from .pipeline import STREAMS, ModelCache, Pipeline, Settings
 from .recorder import DEFAULT_DIR as DEFAULT_RECORD_DIR
 from .recorder import Recorder
 from .segmenter import Caption
@@ -238,10 +238,12 @@ class Backend:
         if r:
             r.on_caption(c)
         src = "zh" if c.lang == "zh" else (detect_de_en(c.text) if c.text else None)
+        # microphone alone: it is listening to the room (a lecture), not to "me"
+        who = "room" if c.stream == "me" and "other" not in self.settings.sources and not self.settings.file else None
         self.broadcast({
             "type": "caption", "stream": c.stream, "utt": f"{self.session}-{c.utt_id}",
             "start": c.start, "end": c.end, "committed": c.committed, "tentative": c.tentative,
-            "final": c.final, "src": src, "translation": c.translation,
+            "final": c.final, "src": src, "translation": c.translation, "who": who,
         })
 
     def _on_level(self, stream: str, db: float) -> None:
@@ -339,7 +341,8 @@ class Backend:
 
     def _open_recorder(self) -> None:
         if self.recorder is None:
-            self.recorder = Recorder(self.record_dir, list(self.settings.sources))
+            # live: both files follow the clock, whichever sides are on (or switched) meanwhile
+            self.recorder = Recorder(self.record_dir, list(STREAMS), align=not self.settings.file)
             self.last_recording = str(self.recorder.dir)
 
     def _close_recorder(self) -> None:
@@ -362,6 +365,8 @@ class Backend:
             if self.pipeline and self.pipeline.running:  # new key takes effect right away
                 self.pipeline.set_model(s.model, s.scene)
             return
+        if key == "sources":
+            return self._set_sources(value)
         if key not in {f.name for f in dataclasses.fields(Settings)}:
             return  # UI-only keys (overlay look etc.)
         setattr(s, key, value)
@@ -382,6 +387,20 @@ class Backend:
                 self.start()
             elif key in ("engine", "zh"):
                 self._load_models()
+
+    def _set_sources(self, value) -> None:
+        """Switch a side (system audio / microphone) on or off: at once, without a restart."""
+        s, p = self.settings, self.pipeline
+        s.sources = [k for k in STREAMS if k in (value or [])]
+        s.save(self.settings_path)
+        if not (p and p.running) or s.file:
+            return
+        try:
+            p.set_sources(s.sources)
+        except Exception:  # e.g. no microphone: keep the setting true to what is running
+            s.sources = [k for k in STREAMS if k in p.procs]
+            s.save(self.settings_path)
+            raise
 
     def _check_replay_done(self) -> None:
         p = self.pipeline

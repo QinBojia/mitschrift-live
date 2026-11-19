@@ -7,6 +7,11 @@ caption times still line up. Encoding costs ~2 ms per second of audio. Replaying
 doesn't change that (bench test 2026-11-19: 64-160 kbps all alike). If this soundfile /
 libsndfile can't write MP3, the recorder falls back to WAV.
 
+A file is opened when its side first delivers audio. With align=True (live capture) every
+file follows the clock from the moment the recording started: time in which a side delivered
+nothing - it was switched off, or nothing was playing yet - is filled with silence, so the
+files of the two sides stay in step with each other and with the caption times.
+
 Writes come from the audio threads while the UI may close the recorder at any time, so
 everything goes through one lock and late writes after close() are dropped.
 """
@@ -27,6 +32,7 @@ from .segmenter import Caption
 
 DEFAULT_DIR = Path.home() / "Documents" / "Mitschrift Live"
 MP3_KBPS = 64
+ALIGN_SLACK = 0.5  # s a file may lag the clock before the gap is filled (capture jitter is far below)
 
 
 def _mp3_level(kbps: int) -> float:
@@ -48,20 +54,30 @@ def open_audio(path_stem: Path) -> sf.SoundFile:
 
 
 class Recorder:
-    def __init__(self, out_dir: str | Path, streams: list[str]):
+    def __init__(self, out_dir: str | Path, streams: list[str], align: bool = False):
         stamp = time.strftime("%Y%m%d-%H%M%S")
         self.dir = Path(out_dir) / stamp
         self.dir.mkdir(parents=True, exist_ok=True)
-        self._wavs = {s: open_audio(self.dir / s) for s in streams}
+        self._streams, self._align = set(streams), align
+        self._wavs: dict[str, sf.SoundFile] = {}
         self._jsonl = (self.dir / "captions.jsonl").open("w", encoding="utf-8")
         self._lock = threading.Lock()
         self._closed = False
         self.started = time.time()
+        self._t0 = time.monotonic()
 
     def on_audio(self, stream: str, block: np.ndarray) -> None:
         with self._lock:
-            if not self._closed and stream in self._wavs:
-                self._wavs[stream].write(block)
+            if self._closed or stream not in self._streams:
+                return
+            w = self._wavs.get(stream)
+            if w is None:
+                w = self._wavs[stream] = open_audio(self.dir / stream)
+            if self._align:
+                behind = int((time.monotonic() - self._t0) * SAMPLE_RATE) - w.frames - len(block)
+                if behind > ALIGN_SLACK * SAMPLE_RATE:
+                    w.write(np.zeros(behind, dtype=np.float32))
+            w.write(block)
 
     def on_caption(self, c: Caption) -> None:
         if c.final and c.committed:
@@ -76,6 +92,10 @@ class Recorder:
                 return
             self._closed = True
             for w in self._wavs.values():
+                if self._align:  # a side that went quiet or was switched off: same end as the other file
+                    behind = int((time.monotonic() - self._t0) * SAMPLE_RATE) - w.frames
+                    if behind > 0:
+                        w.write(np.zeros(behind, dtype=np.float32))
                 frames = w.frames
                 w.close()
                 if frames == 0:  # e.g. mic not used: don't leave an empty file behind
