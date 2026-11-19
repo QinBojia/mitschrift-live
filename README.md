@@ -46,8 +46,9 @@ For translation, open the app, click ⚙ → Translation and paste a
 - **Local speech recognition.** NVIDIA Parakeet TDT 0.6B v3 (German, English and 23 more
   European languages) on an NVIDIA GPU, an Intel NPU, AMD / Intel integrated graphics
   (DirectML) or the CPU. Chinese is detected per utterance and transcribed by SenseVoice Small.
-- **Live, then final.** Words appear while someone speaks and settle into sentences; long
-  monologues are split at sentence ends, with a small overlap so no word is lost or doubled.
+- **Live, then final, sentence by sentence.** Words appear while someone speaks; each
+  sentence becomes its own caption about 1.5 s after it ends, even when the speaker doesn't
+  pause, and is translated right away.
 - **Sentence-by-sentence translation** with the previous lines as context and a "scene" hint
   (default: *a German language class*). DeepSeek or Claude; target 中文 / English / Deutsch, or off.
 - **Works with speakers, not just headphones.** WebRTC echo cancellation on the microphone
@@ -72,11 +73,14 @@ microphone ─> echo cancel ─────┘                                  
                                                                                └─> caption bar (native, per-pixel alpha)
 ```
 
-- The **segmenter** cuts speech into utterances at pauses (0.5 s), re-transcribes the
-  growing utterance every ~0.5 s (less often on slow machines), and every ~9 s of speech
-  without a pause makes a forced cut: words heard ≥ 1.5 s before the cut are committed, the
-  last committed word is heard again in the next window so nothing falls between the pieces,
-  and the caption is closed at the last sentence end among the committed words. When a
+- The **segmenter** cuts speech into utterances at pauses (0.5 s) and re-transcribes the
+  growing utterance every ~0.5 s (less often on slow machines). Captions follow sentences:
+  once a sentence end has 1.5 s of audio after it, that sentence is committed as a caption
+  and recognition continues from its last word, which is heard again so nothing falls
+  between the pieces (sentences under three words wait for the next one; after 8 s without
+  a sentence end the cut falls on a comma). On a recording of TV dialogue this took the
+  90th-percentile caption from 23 words to 14 and the longest from 41 to 22, with unchanged
+  accuracy. Speech with no usable sentence end is cut after ~9 s all the same. When a
   recognition leaves out speech that the voice detector heard, it is retried on slightly
   different views of the audio, and words the previous window had already heard are kept.
 - **Language routing**: SenseVoice's language ID decides during the first 2.5 s of an

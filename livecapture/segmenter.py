@@ -2,7 +2,9 @@
 
 An utterance starts when the VAD fires and ends after `min_silence` of non-speech.
 While it is running, the buffer is re-transcribed every `partial_interval` to show
-tentative text.
+tentative text. Captions follow sentences: as soon as a sentence end has `tail_keep`
+seconds of audio after it, the caption is closed and the speech continues in a new one,
+so a caption is one sentence even when nobody pauses (see SegmenterConfig).
 
 If an utterance grows past `max_segment` (the NPU can only take 10 s), the words up
 to a natural boundary ~`tail_keep` before the end are committed and the buffer
@@ -30,7 +32,7 @@ import numpy as np
 
 from . import SAMPLE_RATE as SR
 from .sensevoice import SenseVoice
-from .stt import SttEngine, Transcript, Word, join_text, words_text
+from .stt import SttEngine, Transcript, Word, is_cjk, join_text, words_text
 from .vad import FRAME, SileroVad
 
 
@@ -65,12 +67,18 @@ class SegmenterConfig:
     # recognition time (capped), so live updates never pile up; finals are unaffected.
     adaptive_factor: float = 4.0
     max_partial_interval: float = 3.0
-    # Speech without pauses: a caption is closed at the last sentence end at each forced
-    # cut, and after max_caption seconds without one, at a comma (or the cut itself). Only
-    # words >= tail_keep before the window end count: Parakeet puts a full stop at the end
-    # of any clip, so the last words of a live recognition are no evidence of a sentence end
-    # (a "shorter pause after a full stop" rule split "OpenShell and BlueField" mid-phrase).
-    max_caption: float = 25.0
+    # Captions follow sentences, not pauses: while someone speaks, a caption is closed as
+    # soon as a sentence end has tail_keep seconds of audio after it, and whatever is
+    # committed at a pause or a forced cut is cut into one caption per sentence (dialogue
+    # with pauses < min_silence used to give captions of 3-4 sentences and up to 40 words;
+    # film subtitles have 7 words per line, 17 at most). A sentence of fewer than
+    # min_sentence words shares the caption of the next one. After max_caption seconds
+    # without a sentence end the caption is closed at a comma (or at the cut itself).
+    # Only words >= tail_keep before the window end count: Parakeet puts a full stop at the
+    # end of any clip, so the last words of a live recognition are no evidence of a sentence
+    # end (a "shorter pause after a full stop" rule split "OpenShell and BlueField" mid-phrase).
+    min_sentence: int = 3
+    max_caption: float = 8.0
     max_segment: float = 9.0  # forced cut length (must stay below the engine limit)
     tail_keep: float = 1.5  # s of audio left uncommitted at a forced cut
     overlap_margin: float = 0.15  # s re-heard before the last committed word's onset
@@ -116,6 +124,30 @@ def sentence_split(words: list[Word], clause: bool = False) -> int | None:
         if ends_sentence(words[i].text) or (clause and text[-1:] in _CLAUSE_END):
             return i + 1
     return None
+
+
+def sentence_groups(words: list[Word], min_words: int, have: int = 0) -> tuple[list[list[Word]], list[Word]]:
+    """Cut words into captions at sentence ends: (complete captions, the words left over).
+    A sentence that leaves the caption below min_words words (`have`: words the caption
+    already holds) waits for the next one, so "No." gets no caption of its own mid-speech."""
+    groups: list[list[Word]] = []
+    cur: list[Word] = []
+    for w in words:
+        cur.append(w)
+        if ends_sentence(w.text) and len(cur) + have >= min_words:
+            groups.append(cur)
+            cur, have = [], 0
+    return groups, cur
+
+
+def capitalized(text: str) -> str:
+    """The text with a capital first letter (a caption that starts a new sentence)."""
+    return text[:1].upper() + text[1:]
+
+
+def count_words(text: str) -> int:
+    """Words of a caption text; a CJK character counts as one."""
+    return sum(len(t) if any(is_cjk(c) for c in t) else 1 for t in text.split())
 
 
 def rms_db(x: np.ndarray) -> float:
@@ -255,6 +287,7 @@ class StreamProcessor(threading.Thread):
         self._utt_ids = itertools.count(1)
         self._in_speech = False
         self.forced_cuts = 0
+        self.sentence_cuts = 0  # captions closed at a sentence end while the speech went on
         self.retries = 0
         self.restored = 0  # words taken over from the previous window (see _words)
         self.lag = 0.0  # s between real time and processed audio (live only)
@@ -365,6 +398,7 @@ class StreamProcessor(threading.Thread):
         self._speech_frames = 1
         self._last_update = self._pos
         self._lang: str | None = None  # "zh" -> SenseVoice, None -> Parakeet
+        self._after_sentence = False  # this caption continues right after a sentence end
         self._lang_locked = self.sv is None
 
     def _recognize(self, audio: np.ndarray) -> Transcript:
@@ -437,6 +471,8 @@ class StreamProcessor(threading.Thread):
 
     def _emit(self, committed: str, tentative: str, final: bool, end: int | None = None) -> None:
         """end: stream position (samples) where the caption ends; default: now."""
+        if self._after_sentence:  # the model saw these words mid-window and may not capitalize them
+            committed, tentative = (capitalized(committed), tentative) if committed else ("", capitalized(tentative))
         self.on_caption(
             Caption(
                 stream=self.stream,
@@ -451,9 +487,31 @@ class StreamProcessor(threading.Thread):
         )
 
     def _partial(self) -> None:
-        words = self._words(self._audio())
+        audio = self._audio()
+        words = self._words(audio)
         self._last_update = self._pos
-        self._emit(self._committed, words_text(words), final=False)
+        k = self._sentence_ready(words, len(audio))
+        if k is None:
+            self._emit(self._committed, words_text(words), final=False)
+            return
+        self.sentence_cuts += 1
+        rest = words[k:]
+        self._cut(audio, words[:k], rest, rest[0].start if rest else words[k - 1].end + 0.2)
+
+    def _sentence_ready(self, words: list[Word], n: int) -> int | None:
+        """Number of leading words that can be committed right now: up to the last sentence
+        end (a clause end once the caption is max_caption seconds old) that has tail_keep
+        seconds of audio after it, lies far enough into the buffer for a cut, and closes a
+        caption. Not on a recognition that left speech out."""
+        cfg = self.cfg
+        limit, first = n / SR - cfg.tail_keep, cfg.min_advance + cfg.overlap_margin
+        ok = [i for i, w in enumerate(words) if first <= w.start and w.end <= limit]
+        k = next((i + 1 for i in reversed(ok) if ends_sentence(words[i].text)), None)
+        if k is not None and not sentence_groups(words[:k], cfg.min_sentence, count_words(self._committed))[0]:
+            k = None  # only sentences too short for a caption of their own so far
+        if k is None and (self._pos - self._utt_start) >= cfg.max_caption * SR:
+            k = next((i + 1 for i in reversed(ok) if words[i].text.rstrip().rstrip(_CLOSERS)[-1:] in _CLAUSE_END), None)
+        return None if k is None or self._suspect(words, n) else k
 
     def _caption_done(self, text: str) -> None:
         if text:
@@ -464,10 +522,9 @@ class StreamProcessor(threading.Thread):
         cfg = self.cfg
         trailing = max(0, self._silence * FRAME - int(cfg.post_pad * SR))
         audio = self._audio()[: self._buf_len - trailing]
-        text = ""
         if self._speech_frames * FRAME >= cfg.min_speech * SR or self._committed:
-            text = words_text(self._words(audio, robust=True))
-        full = _join(self._committed, text)
+            self._split_caption(self._words(audio, robust=True), len(audio) / SR, closing=True)
+        full = self._committed
         self._emit(full, "", final=True)
         self._caption_done(full)
         self._in_speech = False
@@ -488,10 +545,17 @@ class StreamProcessor(threading.Thread):
             commit = [w for w in words if w.end <= q]
             rest = words[len(commit) :]
             next_onset = q
-        # re-hear the whole last committed word so the overlap can be matched by text
-        cut_t = min(commit[-1].start - margin, next_onset - 0.3) if commit else next_onset - 0.3
-        cut_n = int(np.clip(cut_t * SR, cfg.min_advance * SR, len(audio) - 0.5 * SR))
         self.forced_cuts += 1
+        self._cut(audio, commit, rest, next_onset)
+
+    def _cut(self, audio: np.ndarray, commit: list[Word], rest: list[Word], next_onset: float) -> None:
+        """Commit `commit` and restart the buffer just before its last word: that word is
+        heard again whole, so the overlap can be matched by text. next_onset: where the first
+        uncommitted word starts."""
+        cfg = self.cfg
+        dur = len(audio) / SR
+        cut_t = min(commit[-1].start - cfg.overlap_margin, next_onset - 0.3) if commit else next_onset - 0.3
+        cut_n = int(np.clip(cut_t * SR, cfg.min_advance * SR, len(audio) - 0.5 * SR))
         self._split_caption(commit, rest[0].start if rest else next_onset)
         self._tail = (self._tail + [_norm(w.text) for w in commit])[-3:]
         self._boundary = next_onset - cut_n / SR
@@ -501,30 +565,37 @@ class StreamProcessor(threading.Thread):
         # not its last half second: a window's final word is often a clipped one
         self._heard = [Word(w.text, w.start - cut_n / SR, w.last - cut_n / SR, w.space) for w in rest if w.end <= dur - 0.5]
         self._last_update = self._pos
-        self._emit(self._committed, words_text(rest), final=False)
+        if self._committed or rest:  # nothing to show yet for a caption that has no words
+            self._emit(self._committed, words_text(rest), final=False)
 
-    def _split_caption(self, commit: list[Word], next_start: float) -> None:
-        """Commit words at a forced cut. Speech that runs on without a pause is still cut
-        into captions: everything up to the last sentence end in `commit` becomes a final
-        caption and the rest continues as a new one (after max_caption seconds without a
-        sentence end, at a clause end or the cut). Word times are relative to the buffer."""
+    def _split_caption(self, commit: list[Word], next_start: float, closing: bool = False) -> None:
+        """Commit words. Every sentence in them that completes a caption (sentence_groups)
+        closes one: it goes out as final and the speech continues in a new caption, with the
+        same language decision. After max_caption seconds without a sentence end the caption
+        is closed at a clause end or at the end of `commit`. What is left stays in
+        self._committed. closing: the utterance ends here and the caller sends the last
+        caption, so the last sentence is left for it. Word times are relative to the buffer;
+        next_start: where the first word after `commit` starts."""
         cfg = self.cfg
         buf_start = self._pos - self._buf_len  # stream position of the buffer's first sample
-        k = sentence_split(commit) if commit else None
-        if k is None and commit and (self._pos - self._utt_start) >= cfg.max_caption * SR:
-            k = sentence_split(commit, clause=True) or len(commit)
-        if k is None:
-            self._committed = _join(self._committed, words_text(commit))
-            return
-        head, carry = commit[:k], commit[k:]
-        done = _join(self._committed, words_text(head))
-        self._emit(done, "", final=True, end=buf_start + int(head[-1].end * SR))
-        self._caption_done(done)
-        # the same speaker goes on: new caption, same language decision
-        first = carry[0].start if carry else next_start
-        self._utt_id = next(self._utt_ids)
-        self._utt_start = buf_start + int(max(0.0, first - 0.1) * SR)
-        self._committed = words_text(carry)
+        groups, carry = sentence_groups(commit, cfg.min_sentence, count_words(self._committed))
+        if closing and groups and not carry:
+            carry = groups.pop()
+        elif not closing and not groups and carry and (self._pos - self._utt_start) >= cfg.max_caption * SR:
+            k = sentence_split(carry, clause=True) or len(carry)
+            groups, carry = [carry[:k]], carry[k:]
+        rest = commit
+        for g in groups:
+            rest = rest[len(g) :]
+            done = _join(self._committed, words_text(g))
+            self._emit(done, "", final=True, end=buf_start + int(g[-1].end * SR))
+            self._caption_done(done)
+            first = rest[0].start if rest else next_start
+            self._utt_id = next(self._utt_ids)
+            self._utt_start = buf_start + int(max(0.0, first - 0.1) * SR)
+            self._committed = ""
+            self._after_sentence = ends_sentence(g[-1].text)
+        self._committed = _join(self._committed, words_text(carry))
 
     @staticmethod
     def _quietest(audio: np.ndarray, a: float, b: float) -> float:
