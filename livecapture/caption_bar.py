@@ -143,7 +143,11 @@ NO_LINE_START = set("，。、？！：；,.?!:;…）)」』”’")
 KEEP = 80  # captions remembered; the bar shows as many of the newest as fit its height
 MIN_FRAME_S = 0.12  # caption updates are drawn at most ~8 times a second (a frame costs ~25 ms)
 SHOW_MODES = ("both", "original", "translation")  # what a caption shows; the bar button cycles through them
-DEFAULTS = {"font": 26, "text_alpha": 1.0, "bg_alpha": 1.0, "show": "both"}
+# font: px (at 100 % display scaling) of every caption line. font_v 2: since 0.3.3 every line has
+# that size; before, "font" was the newest line's size and earlier lines got 0.78 of it - the size
+# the user chose to keep for all (an old setting is converted, see CaptionBar).
+DEFAULTS = {"font": 20, "text_alpha": 1.0, "bg_alpha": 1.0, "show": "both", "font_v": 2}
+FONT_RANGE = (12, 40)
 
 
 def entry_lines(e: dict, mode: str) -> tuple[list[tuple[str, float]], tuple[str, float] | None]:
@@ -229,51 +233,45 @@ def _round_mask(w: int, h: int, r: int) -> Image.Image:
     return m.resize((w, h), Image.LANCZOS)
 
 
-def _speaker(e: dict) -> tuple[str, tuple]:
-    """Label text and colour of a caption's speaker."""
-    if e.get("who") == "room":  # the microphone alone: it hears the room, not "me"
-        return tr("who.room"), WHO_COLOR["other"]
-    return tr(f"who.{e['stream']}"), WHO_COLOR.get(e["stream"], WHITE)
+def speaker_color(e: dict) -> tuple:
+    """Colour of the bar left of a caption: who spoke (the microphone alone hears the room,
+    shown like the other side)."""
+    return WHO_COLOR["other"] if e.get("who") == "room" else WHO_COLOR.get(e["stream"], WHITE)
 
 
-Row = tuple  # (y top, font, line height, [(x, text, rgb, alpha)]) - one line of the bar
+Row = tuple  # (y top, font, line height, [(x, text, rgb, alpha)], (caption index, bar rgb) | None)
 
 
 def layout(w: int, h: int, scale: float, entries: list[dict], prefs: dict) -> list[Row]:
-    """The lines the bar shows, bottom-up: the newest caption at the bottom (full size), older
-    ones (a little smaller) above it for as many whole lines as fit. A caption's speaker is
-    named only where it changes, so a long run of one side doesn't spend a line per caption."""
+    """The lines the bar shows, bottom-up: the newest caption at the bottom, earlier ones above
+    it for as many whole lines as fit. Every line has the same size and line height, whatever
+    its language, original or translation, newest or not: the original is bold, a translation
+    regular. Who spoke is a coloured bar left of each caption (render), not a label line."""
     px = lambda v: max(1, round(v * scale))  # noqa: E731
-    fs = prefs["font"]
+    size = px(prefs["font"])
+    bold, regular = _font(size, True), _font(size, False)
+    lh, gap = round(size * 1.35), round(size * 0.4)
     pad_l, pad_r, pad_t, pad_b = px(24), px(24), px(8), px(14)
     width = w - pad_l - pad_r
     if not entries:
-        f = _font(px(15), False)
-        asc, desc = f.getmetrics()
-        return [(h - pad_b - asc - desc, f, asc + desc, [(0.0, tr("bar.idle"), WHITE, 0.45)])]
+        return [(h - pad_b - lh, regular, lh, [(0.0, tr("bar.idle"), WHITE, 0.45)], None)]
     rows: list[Row] = []
     y = h - pad_b
     for i in range(len(entries) - 1, -1, -1):
-        e, newest = entries[i], i == len(entries) - 1
-        lines = []  # (font, line height, items), top-down
-        if i == 0 or _speaker(entries[i - 1]) != _speaker(e):
-            fw = _font(px(11), False)
-            who, color = _speaker(e)
-            lines.append((fw, round(px(11) * 1.25), [(0.0, who, color, 1.0)]))
+        e = entries[i]
         main, line = entry_lines(e, prefs["show"])
-        fo = _font(px(fs * (1.0 if newest else 0.78)), True)
-        lines += [(fo, round(fo.size * 1.35), ln) for ln in _wrap([(s, WHITE, a) for s, a in main], fo, width)]
+        # "translation only" with the translation there: the main line is the translation
+        fm = regular if prefs["show"] == "translation" and e.get("translation") not in (None, "", PENDING) else bold
+        lines = [(fm, ln) for ln in _wrap([(s, WHITE, a) for s, a in main], fm, width)]
         if line:
-            pending = e.get("translation") == PENDING
-            ft = _font(px(fs * (0.62 if pending else 0.8 if newest else 0.66)), False)
-            lines += [(ft, round(ft.size * 1.4), ln) for ln in _wrap([(line[0], WHITE, line[1])], ft, width)]
-        if not newest:
-            y -= px(8)  # between captions
-        for font, lh, items in reversed(lines):
+            lines += [(regular, ln) for ln in _wrap([(line[0], WHITE, line[1])], regular, width)]
+        if i < len(entries) - 1:
+            y -= gap  # between captions
+        for font, items in reversed(lines):
             if y - lh < pad_t:
                 return rows
             y -= lh
-            rows.append((y, font, lh, items))
+            rows.append((y, font, lh, items, (i, speaker_color(e))))
     return rows
 
 
@@ -281,7 +279,7 @@ def _draw_rows(draw: ImageDraw.ImageDraw, rows: list[Row], x0: int, text_alpha: 
     """Draws the rows into an alpha layer (all text is one colour per run, so its coverage is
     all a layer needs); returns (box, rgb) for the runs that are not white."""
     tints = []
-    for y, font, lh, items in rows:
+    for y, font, lh, items, _ in rows:
         asc, desc = font.getmetrics()
         base = y + (lh - asc - desc) / 2 + asc
         i = 0
@@ -312,7 +310,29 @@ def render(w: int, h: int, scale: float, entries: list[dict], prefs: dict, *, ho
     text, tools."""
     px = lambda v: max(1, round(v * scale))  # noqa: E731
     alpha = Image.new("L", (w, h))
-    tints = _draw_rows(ImageDraw.Draw(alpha), layout(w, h, scale, entries, prefs), px(24), prefs["text_alpha"])
+    draw = ImageDraw.Draw(alpha)
+    rows = layout(w, h, scale, entries, prefs)
+    tints = _draw_rows(draw, rows, px(24), prefs["text_alpha"])
+    # who spoke: a bar in the speaker's colour left of the captions, as tall as their visible
+    # lines; one bar for a run of captions by the same side (across the gaps between them)
+    spans: dict[int, list] = {}
+    for y, font, lh, _, bar in rows:
+        if bar:
+            s = spans.setdefault(bar[0], [y, y + lh, bar[1], font.size])
+            s[0], s[1] = min(s[0], y), max(s[1], y + lh)
+    runs: list[list] = []  # [top, bottom, rgb, size, last caption index], oldest first
+    for i in sorted(spans):
+        top, bottom, rgb, size = spans[i]
+        if runs and runs[-1][4] == i - 1 and runs[-1][2] == rgb:
+            runs[-1][1], runs[-1][4] = bottom, i
+        else:
+            runs.append([top, bottom, rgb, size, i])
+    bw, bx = max(2, px(3)), px(12)
+    for top, bottom, rgb, size, _ in runs:
+        inset = round(size * 0.18)
+        box = (bx, top + inset, bx + bw - 1, bottom - inset)
+        draw.rounded_rectangle(box, bw // 2, fill=round(255 * prefs["text_alpha"]))
+        tints.append(((bx, top, bx + bw, bottom), rgb))
     bg_a = prefs["bg_alpha"] if not hover or locked else max(prefs["bg_alpha"], HOVER_BG_FLOOR)
     out = _panel(w, h, px(16), round(bg_a * 255), locked).copy()
     if box := alpha.getbbox():
@@ -387,9 +407,12 @@ class CaptionBar:
         """
         if "show" not in prefs and prefs.get("translation") is False:  # saved by 0.3.0 and earlier
             prefs = {**prefs, "show": "original"}
+        if "font" in prefs and prefs.get("font_v") != DEFAULTS["font_v"]:  # saved by 0.3.2 and earlier
+            prefs = {**prefs, "font": round(prefs["font"] * 0.78), "font_v": DEFAULTS["font_v"]}
         self.prefs = {**DEFAULTS, **{k: v for k, v in prefs.items() if k in DEFAULTS}}
         if self.prefs["show"] not in SHOW_MODES:
             self.prefs["show"] = "both"
+        self.prefs["font"] = max(FONT_RANGE[0], min(FONT_RANGE[1], int(self.prefs["font"])))
         self.geometry = geometry
         self._on_prefs, self._on_command = on_prefs, on_command
         self._lock = threading.Lock()
@@ -437,7 +460,7 @@ class CaptionBar:
 
     def set_pref(self, key: str, value) -> None:
         if key == "font":
-            value = max(16, min(48, int(value)))
+            value = max(FONT_RANGE[0], min(FONT_RANGE[1], int(value)))
         elif key == "text_alpha":
             value = max(0.2, min(1.0, float(value)))
         elif key == "bg_alpha":
