@@ -56,7 +56,8 @@ For translation, open the app, click ⚙ → Translation and paste a
   (system audio as reference) plus a text-level echo filter.
 - **Floating caption bar.** Always on top, never steals focus from Zoom, click-through mode
   with a global hotkey (Ctrl+Alt+L), separate text and background opacity.
-- Follows the Windows default devices, records audio + captions on request, exports
+- Follows the Windows default devices, records audio + captions on request (including what
+  was said before you pressed ● Record), exports
   TXT / SRT / Markdown, lives in the tray. English or Chinese interface (follows Windows).
 
 Audio never leaves your computer. Only the text of finished sentences (plus a few previous
@@ -198,7 +199,9 @@ The engines work best with converted encoders, made once with the scripts in `be
   microphone on, its captions are labelled *Room*. (With echo cancellation on, system
   audio is still picked up as the reference for the microphone, but not transcribed.)
 - **Caption bar**: show / hide it. Drag it by its body, resize it at its edges; its buttons
-  (A− A+, what to show, click-through, ×) appear on hover. It can show original and
+  (A− A+, what to show, click-through, ×) appear on hover. The newest caption is at the
+  bottom and earlier ones fill the space above it: drag the bar taller to keep more of
+  what was said in view. It can show original and
   translation, the original only, or the translation only (the original then stands in,
   dimmed, until its translation arrives).
 - **Click-through**: clicks go to the window below. Turn it off with **Ctrl+Alt+L**
@@ -206,7 +209,17 @@ The engines work best with converted encoders, made once with the scripts in `be
 - **⚙ Settings**: interface language, devices (default: follow Windows), echo cancellation,
   engine, Chinese detection, translation model, API keys and scene, caption bar font size and
   text / background opacity.
-- **● Record**: both sides (MP3, ~30 MB per hour each) plus captions to `Documents\Mitschrift Live`.
+- **● Record**: both sides (MP3, ~30 MB per hour each) plus captions to `Documents\Mitschrift Live`,
+  one folder per recording (named after its start time). A recording runs until you press
+  ● Record again or quit: pausing, switching a side off and the automatic restarts (another
+  default device, a changed engine) don't split it - the audio just has silence there. It
+  starts with the captions from before you pressed it (since launch or the last *Clear*).
+  In the folder: `other.mp3` / `me.mp3`, `captions.jsonl` (one caption per line with its
+  start and end as Unix times, `offset` = seconds into the audio, negative for captions from
+  before the recording, speaker, language, translation) and `meta.json` (exact start time,
+  version, settings, pauses and switches).
+- **Clear** (bottom bar): empties this window and the caption bar; a recording started later
+  begins after this point, recordings already made keep everything.
 - Closing the window keeps the app running in the tray; quit from the tray menu.
 
 Settings, keys and logs live in `~/.livecapture` (`settings.json`, `ui.json`, `keys.json`,
@@ -260,6 +273,8 @@ such builds.
 - Words of one language inside sentences of another (e.g. German words in Chinese speech)
   are often garbled; product names the model doesn't know get misheard.
 - When two people talk at once, a few seconds can still be lost.
+- Speech under loud music (a film score) is now picked up, but the model often mishears it,
+  sometimes as a line in another European language.
 - A copy installed before 0.3.0 keeps its old speech models when it is updated with an
   `…-Update.exe` (CPU: the ready-made int8 encoder, NPU: full int8). The update still helps,
   but only a 0.3.0 installer brings the better encoders.

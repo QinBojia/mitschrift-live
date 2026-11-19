@@ -1,8 +1,14 @@
 """Backend for the desktop UI: runs the Pipeline and talks to the pages over a WebSocket.
 
 Protocol (see ui/client.js):
-  server -> page: caption / status / levels / devices
-  page -> server: {type:"control", action:"start"|"stop"}, {type:"set", key, value}
+  server -> page: caption / status / levels / devices / clear
+  page -> server: {type:"control", action:"start"|"stop"}, {type:"set", key, value}, {type:"clear"}
+
+The backend keeps the finished captions since launch (or since the user cleared them): a
+recording started later begins with them, so what was said before pressing ● Record is in it
+too (with negative offsets: there is no audio for it). A recording runs from ● Record on to off
+(or quitting): pausing and the automatic restarts (another default device, a changed engine)
+don't split it - its audio is filled with silence meanwhile and meta.json notes the pause.
 
 The socket listens on 127.0.0.1 only, on a random port, and needs a random token from
 the page URL - a web page from anywhere else can't connect and read the captions.
@@ -34,6 +40,9 @@ from .segmenter import Caption
 from .translate import detect_de_en
 
 SETTINGS_FILE = models.APP_DIR / "settings.json"
+HISTORY_MAX = 20000  # finished captions kept for a recording started later (~20 h of talk)
+
+
 def engine_label(engine: str) -> str:
     return tr(f"engine.{engine}") if engine in ("cuda", "npu", "dml", "cpu") else engine
 
@@ -77,6 +86,8 @@ class Backend:
         self.record_dir = DEFAULT_RECORD_DIR
         self.recorder: Recorder | None = None
         self.last_recording: str | None = None
+        self.history: list[dict] = []  # finished captions since launch / the last clear (see above)
+        self._hist_lock = threading.Lock()  # history + recorder: no caption lost or doubled at ● Record
         self.notice: str | None = None  # short info line for the UI (e.g. device switched)
         self._notice_until = 0.0
         self._clients: set[ServerConnection] = set()
@@ -234,12 +245,17 @@ class Backend:
             r.on_audio(stream, block)
 
     def _on_caption(self, c: Caption) -> None:
-        r = self.recorder
-        if r:
-            r.on_caption(c)
         src = "zh" if c.lang == "zh" else (detect_de_en(c.text) if c.text else None)
         # microphone alone: it is listening to the room (a lecture), not to "me"
         who = "room" if c.stream == "me" and "other" not in self.settings.sources and not self.settings.file else None
+        if c.final and c.committed:
+            record = {**dataclasses.asdict(c), "session": self.session, "who": who, "src": src}
+            with self._hist_lock:
+                self.history.append(record)
+                if len(self.history) > HISTORY_MAX:
+                    del self.history[: len(self.history) - HISTORY_MAX]
+                if self.recorder:
+                    self.recorder.write_caption(record)
         self.broadcast({
             "type": "caption", "stream": c.stream, "utt": f"{self.session}-{c.utt_id}",
             "start": c.start, "end": c.end, "committed": c.committed, "tentative": c.tentative,
@@ -254,6 +270,8 @@ class Backend:
         try:
             if msg.get("type") == "control":
                 self.start() if msg.get("action") == "start" else self.stop()
+            elif msg.get("type") == "clear":
+                self.clear()
             elif msg.get("type") == "set":
                 self.set(str(msg.get("key")), msg.get("value"))
         except Exception as e:  # noqa: BLE001 - report instead of dying
@@ -316,18 +334,21 @@ class Backend:
         self.session += 1
         _cpu_percent()  # first sample, so the first [stats] line has a CPU figure
         self.pipeline = Pipeline(self.settings, self.cache, self._on_caption, self._on_level, self._on_audio)
+        opened = False
         try:
             self._set_loading(tr("loading.audio"))
             if self.record_on:
-                self._open_recorder()
+                opened = self._open_recorder()
             self.pipeline.start()
             st = self.pipeline.stats()  # models are cached across restarts: count from here
             self._prev_calls = (st["asr_calls"], st["zh_calls"])
             self.error = None
+            self._record_event("start", engine=self.settings.engine, sources=list(self.settings.sources))
         except Exception as e:  # noqa: BLE001 - e.g. device unplugged
             self.pipeline.stop()
             self.pipeline = None
-            self._close_recorder()
+            if opened:
+                self._close_recorder()
             self.error = tr("error.start", e=e)
         finally:
             self._set_loading(None)
@@ -336,26 +357,56 @@ class Backend:
         if self.pipeline:
             self._set_loading(tr("loading.stopping"))
             self.pipeline.stop()  # flushes the last translations first, so they get recorded
-            self._close_recorder()
+            if self.settings.file:  # a replay: every run is a recording of its own
+                self._close_recorder()
+            else:  # paused: the recording goes on (silence) until ● Record is switched off
+                self._record_event("pause")
             self._set_loading(None)
 
-    def _open_recorder(self) -> None:
-        if self.recorder is None:
-            # live: both files follow the clock, whichever sides are on (or switched) meanwhile
-            self.recorder = Recorder(self.record_dir, list(STREAMS), align=not self.settings.file)
-            self.last_recording = str(self.recorder.dir)
+    def clear(self) -> None:
+        """Forget the captions so far (the main window and the caption bar clear theirs too);
+        a recording already made keeps them."""
+        with self._hist_lock:
+            self.history.clear()
+        self.broadcast({"type": "clear"})
+
+    def _open_recorder(self) -> bool:
+        """Start a recording (if none runs) with the captions so far; True if it started one."""
+        if self.recorder is not None:
+            return False
+        s = self.settings
+        meta = {"edition": EDITION.name, "settings": {k: v for k, v in dataclasses.asdict(s).items()
+                                                      if k not in ("file", "file_me", "speed", "ui_lang")}}
+        if s.file:
+            meta["replay"] = {"file": s.file, "file_me": s.file_me, "speed": s.speed}
+        with self._hist_lock:
+            # live: both files follow the clock, whichever sides are on (or switched, or paused) meanwhile
+            r = Recorder(self.record_dir, list(STREAMS), align=not s.file,
+                         meta={**meta, "captions_before": len(self.history)})
+            for record in self.history:
+                r.write_caption(record)
+            self.recorder = r
+        self.last_recording = str(r.dir)
+        return True
 
     def _close_recorder(self) -> None:
-        r, self.recorder = self.recorder, None
+        with self._hist_lock:
+            r, self.recorder = self.recorder, None
         if r:
             r.close()
+
+    def _record_event(self, name: str, **data) -> None:
+        r = self.recorder
+        if r:
+            r.event(name, **data)
 
     def set(self, key: str, value) -> None:
         s = self.settings
         if key == "record":  # runtime toggle, not a saved setting
             self.record_on = bool(value)
             if self.record_on and self.pipeline and self.pipeline.running:
-                self._open_recorder()
+                if self._open_recorder():
+                    self._record_event("start", engine=s.engine, sources=list(s.sources))
             elif not self.record_on:
                 self._close_recorder()
             return
@@ -378,6 +429,7 @@ class Backend:
         elif key == "target":
             if running:
                 self.pipeline.set_target(value)
+            self._record_event("target", value=value)
         elif key in ("model", "scene"):
             if running:
                 self.pipeline.set_model(s.model, s.scene)
@@ -401,6 +453,8 @@ class Backend:
             s.sources = [k for k in STREAMS if k in p.procs]
             s.save(self.settings_path)
             raise
+        finally:
+            self._record_event("sources", value=list(s.sources))
 
     def _check_replay_done(self) -> None:
         p = self.pipeline

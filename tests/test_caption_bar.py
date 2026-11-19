@@ -1,11 +1,20 @@
-"""What the floating caption bar shows in its three display modes (caption_bar.entry_lines)."""
+"""What the floating caption bar shows: its three display modes (caption_bar.entry_lines) and
+how many captions fit (caption_bar.layout)."""
 
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from livecapture.caption_bar import DEFAULTS, PENDING, SHOW_MODES, CaptionBar, entry_lines  # noqa: E402
+from livecapture.caption_bar import (  # noqa: E402
+    DEFAULTS,
+    PENDING,
+    SHOW_MODES,
+    CaptionBar,
+    entry_lines,
+    layout,
+    render,
+)
 
 SPEAKING = {"committed": "Guten Morgen", "tentative": "zusammen", "final": False, "translation": None}
 WAITING = {"committed": "Guten Morgen zusammen.", "tentative": "", "final": True, "translation": PENDING}
@@ -54,3 +63,43 @@ def test_saved_preferences_from_older_versions():
     for _ in range(3):
         bar._click("tr")  # noqa: SLF001 - the bar button cycles through the modes
     assert seen == ["original", "translation", "both"]
+
+
+def _history(n: int) -> list[dict]:
+    """n finished captions, alternating speakers in runs of three, with translations."""
+    return [{"stream": "other" if i // 3 % 2 == 0 else "me", "utt": str(i), "final": True, "tentative": "",
+             "committed": f"Satz Nummer {i} ist kurz.", "translation": f"第 {i} 句很短。"} for i in range(n)]
+
+
+def _texts(rows) -> list[str]:
+    return ["".join(u for _, u, _, _ in items) for _, _, _, items in rows]
+
+
+def test_a_taller_bar_shows_more_of_the_history_and_the_newest_at_the_bottom():
+    entries = _history(30)
+    short = layout(1000, 200, 1.0, entries, DEFAULTS)
+    tall = layout(1000, 600, 1.0, entries, DEFAULTS)
+    assert len(tall) > 2 * len(short)
+    for rows in (short, tall):
+        bottom = max(rows, key=lambda r: r[0])
+        assert _texts([bottom]) == ["第 29 句很短。"]  # the newest caption's translation, last line
+    assert "Satz Nummer 24 ist kurz." in _texts(tall) and "Satz Nummer 24 ist kurz." not in _texts(short)
+
+
+def test_only_whole_lines_inside_the_bar():
+    for h in (120, 200, 333, 600):
+        for y, _, lh, _ in layout(1000, h, 1.0, _history(30), DEFAULTS):
+            assert y >= 0 and y + lh <= h
+
+
+def test_the_speaker_is_named_where_it_changes():
+    texts = _texts(layout(1000, 2000, 1.0, _history(9), DEFAULTS))  # tall enough for all of them
+    labels = [t for t in texts if not t.startswith("Satz") and "句" not in t]
+    assert len(labels) == 3  # other x3, me x3, other x3
+
+
+def test_an_empty_bar_says_it_is_waiting_and_frames_have_the_window_size():
+    assert len(layout(800, 150, 1.0, [], DEFAULTS)) == 1
+    for hover in (False, True):
+        data, rects = render(800, 300, 1.5, _history(12), {**DEFAULTS, "bg_alpha": 0.3}, hover=hover, hot=None, locked=False)
+        assert len(data) == 800 * 300 * 4 and bool(rects) == hover

@@ -7,8 +7,11 @@ own opacity, e.g. solid captions on a 30 % background or on none at all.
 
 The window lives on its own thread with its own message loop. It never takes focus
 (clicking it leaves Zoom focused), is dragged anywhere on its body, resized at its edges,
-and shows its tools (A− A+ 译文 穿透 ✕) while the mouse is over it. All public methods are
-thread-safe.
+and shows its tools (A− A+ 显示内容 穿透 ✕) while the mouse is over it. All public methods
+are thread-safe.
+
+The newest caption sits at the bottom and older ones fill the space above it, as many
+whole lines as the bar is tall: drag it taller to see more of what was said.
 """
 
 from __future__ import annotations
@@ -24,7 +27,6 @@ from collections.abc import Callable
 from ctypes import wintypes
 from pathlib import Path
 
-import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from .i18n import lang, tr
@@ -131,14 +133,14 @@ _sig(kernel32, "GetModuleHandleW", wintypes.HMODULE, wintypes.LPCWSTR)
 # ---------------------------------------------------------------- look (CSS of the old overlay)
 
 FONT_DIR = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
-BG = np.array([18, 14, 12], dtype=np.float32) / 255  # #0c0e12, in BGR order like every layer here
+PANEL = (0x0C, 0x0E, 0x12)  # background
 WHO_COLOR = {"other": (0x5E, 0xE0, 0xD4), "me": (0x9B, 0xE2, 0x7B)}
 ACCENT = (0x6E, 0xA8, 0xFF)
 WHITE = (255, 255, 255)
 HOVER_BG_FLOOR = 0.3  # under the mouse the panel shows at least this much, to see where to drag
 TOOLS = [("smaller", "A−"), ("bigger", "A+"), ("tr", ""), ("lock", "bar.lock"), ("close", "×")]  # i18n keys or text ("tr": the display mode)
 NO_LINE_START = set("，。、？！：；,.?!:;…）)」』”’")
-SHOW = 2  # newest captions on screen
+KEEP = 80  # captions remembered; the bar shows as many of the newest as fit its height
 MIN_FRAME_S = 0.12  # caption updates are drawn at most ~8 times a second (a frame costs ~25 ms)
 SHOW_MODES = ("both", "original", "translation")  # what a caption shows; the bar button cycles through them
 DEFAULTS = {"font": 26, "text_alpha": 1.0, "bg_alpha": 1.0, "show": "both"}
@@ -219,160 +221,159 @@ def _wrap(runs: list[tuple[str, tuple, float]], font, width: float) -> list[list
     return [ln for ln in lines if ln] or [[]]
 
 
-class _Canvas:
-    """Two layers drawn with Pillow: premultiplied colour (stored BGR, the window's order) and alpha (L)."""
-
-    def __init__(self, w: int, h: int):
-        self.rgb = Image.new("RGB", (w, h))
-        self.a = Image.new("L", (w, h))
-        self.drgb, self.da = ImageDraw.Draw(self.rgb), ImageDraw.Draw(self.a)
-
-    def text(self, xy, s: str, font, rgb, alpha: float) -> None:
-        self.drgb.text(xy, s, font=font, fill=tuple(round(c * alpha) for c in reversed(rgb)), anchor="ls")
-        self.da.text(xy, s, font=font, fill=round(255 * alpha), anchor="ls")
-
-    def box(self, rect, radius: int, rgb, alpha: float) -> None:
-        self.drgb.rounded_rectangle(rect, radius, fill=tuple(round(c * alpha) for c in reversed(rgb)))
-        self.da.rounded_rectangle(rect, radius, fill=round(255 * alpha))
-
-
-
 @functools.lru_cache(maxsize=4)
-def _round_mask(w: int, h: int, r: int) -> np.ndarray:
+def _round_mask(w: int, h: int, r: int) -> Image.Image:
     k = 3  # supersampled, for smooth corners
     m = Image.new("L", (w * k, h * k))
     ImageDraw.Draw(m).rounded_rectangle((0, 0, w * k - 1, h * k - 1), r * k, fill=255)
-    return np.asarray(m.resize((w, h), Image.LANCZOS), np.float32) / 255
+    return m.resize((w, h), Image.LANCZOS)
+
+
+def _speaker(e: dict) -> tuple[str, tuple]:
+    """Label text and colour of a caption's speaker."""
+    if e.get("who") == "room":  # the microphone alone: it hears the room, not "me"
+        return tr("who.room"), WHO_COLOR["other"]
+    return tr(f"who.{e['stream']}"), WHO_COLOR.get(e["stream"], WHITE)
+
+
+Row = tuple  # (y top, font, line height, [(x, text, rgb, alpha)]) - one line of the bar
+
+
+def layout(w: int, h: int, scale: float, entries: list[dict], prefs: dict) -> list[Row]:
+    """The lines the bar shows, bottom-up: the newest caption at the bottom (full size), older
+    ones (a little smaller) above it for as many whole lines as fit. A caption's speaker is
+    named only where it changes, so a long run of one side doesn't spend a line per caption."""
+    px = lambda v: max(1, round(v * scale))  # noqa: E731
+    fs = prefs["font"]
+    pad_l, pad_r, pad_t, pad_b = px(24), px(24), px(8), px(14)
+    width = w - pad_l - pad_r
+    if not entries:
+        f = _font(px(15), False)
+        asc, desc = f.getmetrics()
+        return [(h - pad_b - asc - desc, f, asc + desc, [(0.0, tr("bar.idle"), WHITE, 0.45)])]
+    rows: list[Row] = []
+    y = h - pad_b
+    for i in range(len(entries) - 1, -1, -1):
+        e, newest = entries[i], i == len(entries) - 1
+        lines = []  # (font, line height, items), top-down
+        if i == 0 or _speaker(entries[i - 1]) != _speaker(e):
+            fw = _font(px(11), False)
+            who, color = _speaker(e)
+            lines.append((fw, round(px(11) * 1.25), [(0.0, who, color, 1.0)]))
+        main, line = entry_lines(e, prefs["show"])
+        fo = _font(px(fs * (1.0 if newest else 0.78)), True)
+        lines += [(fo, round(fo.size * 1.35), ln) for ln in _wrap([(s, WHITE, a) for s, a in main], fo, width)]
+        if line:
+            pending = e.get("translation") == PENDING
+            ft = _font(px(fs * (0.62 if pending else 0.8 if newest else 0.66)), False)
+            lines += [(ft, round(ft.size * 1.4), ln) for ln in _wrap([(line[0], WHITE, line[1])], ft, width)]
+        if not newest:
+            y -= px(8)  # between captions
+        for font, lh, items in reversed(lines):
+            if y - lh < pad_t:
+                return rows
+            y -= lh
+            rows.append((y, font, lh, items))
+    return rows
+
+
+def _draw_rows(draw: ImageDraw.ImageDraw, rows: list[Row], x0: int, text_alpha: float) -> list[tuple[tuple, tuple]]:
+    """Draws the rows into an alpha layer (all text is one colour per run, so its coverage is
+    all a layer needs); returns (box, rgb) for the runs that are not white."""
+    tints = []
+    for y, font, lh, items in rows:
+        asc, desc = font.getmetrics()
+        base = y + (lh - asc - desc) / 2 + asc
+        i = 0
+        while i < len(items):  # one draw call per run of equal colour
+            x, s, rgb, a = items[i]
+            i += 1
+            while i < len(items) and items[i][2:] == (rgb, a):
+                s += items[i][1]
+                i += 1
+            if s.strip():
+                draw.text((x0 + x, base), s, font=font, fill=round(255 * a * text_alpha), anchor="ls")
+                if rgb != WHITE:
+                    tints.append(((math.floor(x0 + x), y, math.ceil(x0 + x + font.getlength(s)) + 1, y + lh), rgb))
+    return tints
+
+
+def _mix(a: tuple, b: tuple, k: float) -> tuple:
+    """Colour a, k of the way to colour b."""
+    return tuple(round(p + (q - p) * k) for p, q in zip(a, b, strict=True))
 
 
 def render(w: int, h: int, scale: float, entries: list[dict], prefs: dict, *, hover: bool,
            hot: str | None, locked: bool) -> tuple[bytes, dict[str, tuple[int, int, int, int]]]:
-    """The bar as premultiplied BGRA bytes, plus the tool buttons' rectangles (when shown)."""
+    """The bar as premultiplied BGRA bytes, plus the tool buttons' rectangles (when shown).
+
+    Layers are straight RGBA composited by Pillow (in C: a frame full of text costs a few ms;
+    the float maths of earlier versions took ~60 ms for the whole bar): panel, text shadow,
+    text, tools."""
     px = lambda v: max(1, round(v * scale))  # noqa: E731
-    fs = prefs["font"]
-    text = _Canvas(w, h)
-    pad_l, pad_r, pad_b = px(24), px(24), px(14)
-    width = w - pad_l - pad_r
+    alpha = Image.new("L", (w, h))
+    tints = _draw_rows(ImageDraw.Draw(alpha), layout(w, h, scale, entries, prefs), px(24), prefs["text_alpha"])
+    bg_a = prefs["bg_alpha"] if not hover or locked else max(prefs["bg_alpha"], HOVER_BG_FLOOR)
+    out = _panel(w, h, px(16), round(bg_a * 255), locked).copy()
+    if box := alpha.getbbox():
+        if bg_a < 0.95:  # on the opaque dark panel a shadow is invisible: skip the work
+            blur, dy = px(1.6), px(1)
+            k = (0.55 + 0.4 * (1 - bg_a)) * 1.6  # stronger the more see-through the panel
+            sb = _grow(box, 3 * blur, w, h)
+            shadow = Image.new("RGBA", (sb[2] - sb[0], sb[3] - sb[1]))  # black
+            shadow.putalpha(alpha.crop(sb).filter(ImageFilter.GaussianBlur(blur)).point(lambda v: min(255, round(v * k))))
+            out.alpha_composite(shadow, (sb[0], sb[1] + dy))
+        color = Image.new("RGB", (box[2] - box[0], box[3] - box[1]), WHITE)
+        for (x0, y0, x1, y1), rgb in tints:
+            color.paste(rgb, (max(0, x0 - box[0]), max(0, y0 - box[1]), min(color.width, x1 - box[0]), min(color.height, y1 - box[1])))
+        layer = color.convert("RGBA")
+        layer.putalpha(alpha.crop(box))
+        out.alpha_composite(layer, box[:2])
 
-    # ---- captions, laid out bottom-up (oldest at the top; overflow is cut off at the top)
-    blocks = []  # (height, draw(y_top))
-    if not entries:
-        f = _font(px(15), False)
-        asc, desc = f.getmetrics()
-        blocks.append((asc + desc, lambda y, f=f, asc=asc: text.text((pad_l, y + asc), tr("bar.idle"), f, WHITE, 0.45)))
-    for i, e in enumerate(entries):
-        old = i < len(entries) - 1
-        parts = []  # (font, line height, lines)
-        fw = _font(px(11), False)
-        room = e.get("who") == "room"  # the microphone alone: it hears the room, not "me"
-        who, who_color = (tr("who.room"), WHO_COLOR["other"]) if room else (tr(f"who.{e['stream']}"), WHO_COLOR.get(e["stream"], WHITE))
-        parts.append((fw, round(px(11) * 1.25), [[(0.0, who, who_color, 1.0)]]))
-        main, line = entry_lines(e, prefs["show"])
-        fo = _font(px(fs * (0.78 if old else 1.0)), True)
-        parts.append((fo, round(fo.size * 1.35), _wrap([(s, WHITE, a) for s, a in main], fo, width)))
-        if line:
-            pending = e.get("translation") == PENDING
-            ft = _font(px(fs * (0.62 if pending else 0.66 if old else 0.8)), False)
-            parts.append((ft, round(ft.size * 1.4), _wrap([(line[0], WHITE, line[1])], ft, width)))
-        height = sum(lh * len(lines) for _, lh, lines in parts) + px(2)
-
-        def draw(y, parts=parts):
-            for font, lh, lines in parts:
-                asc, desc = font.getmetrics()
-                for line in lines:
-                    base = y + (lh - asc - desc) / 2 + asc
-                    for x, u, rgb, a in line:
-                        text.text((pad_l + x, base), u, font, rgb, a)
-                    y += lh
-        blocks.append((height, draw))
-    gap = px(10)
-    y = h - pad_b - sum(b[0] for b in blocks) - gap * (len(blocks) - 1)
-    for height, draw in blocks:
-        draw(y)
-        y += height + gap
-
-    # ---- tools (only under the mouse; a click-through bar can't be clicked anyway)
-    tools = _Canvas(w, h) if hover and not locked else None
+    # ---- tools (only under the mouse; a click-through bar can't be clicked anyway), on a
+    # backing of their own: the captions fill the bar up to its top edge
     rects: dict[str, tuple[int, int, int, int]] = {}
-    if tools:
+    if hover and not locked:
         f = _font(px(12), False)
         asc, desc = f.getmetrics()
-        x = w - px(8)
+        bh = asc + desc + px(8)
+        x, labels = w - px(8), []
         for name, label in reversed(TOOLS):
             if name == "tr":  # shows the current display mode; a click moves on to the next
                 label = tr(f"bar.show.{prefs['show']}")
             else:
                 label = tr(label) if label.startswith("bar.") else label
             bw = round(f.getlength(label)) + px(14)
-            bh = asc + desc + px(8)
-            rect = (x - bw, px(6), x, px(6) + bh)
-            rects[name] = rect
-            on = name == "tr"
-            if name == hot:
-                tools.box(rect, px(6), WHITE, 0.10)
-            color, a = (ACCENT, 1.0) if on else (WHITE, 1.0 if name == hot else 0.5)
-            tools.text((rect[0] + px(7), rect[1] + px(4) + asc), label, f, color, a)
+            rects[name] = (x - bw, px(6), x, px(6) + bh)
+            labels.append((name, label))
             x -= bw + px(2)
-
-    # ---- composite (premultiplied "over"): cached background, then text shadow, text and
-    # tools - only inside the boxes that hold them (whole-frame float maths cost ~60 ms)
-    bg_a = prefs["bg_alpha"] if not hover or locked else max(prefs["bg_alpha"], HOVER_BG_FLOOR)
-    out = _background(w, h, px(16), round(bg_a * 255), locked).copy()
-    ta_scale = prefs["text_alpha"]
-    blur, dy = px(1.6), px(1)
-    box = _grow(text.a.getbbox(), 3 * blur + dy, w, h)
-    if box:
-        x0, y0, x1, y1 = box
-        region = out[y0:y1, x0:x1].astype(np.float32) / 255  # premultiplied BGRA
-        crop_a = text.a.crop(box)
-        if bg_a < 0.95:  # on the opaque dark panel a shadow is invisible: skip the work
-            shadow = np.asarray(crop_a.filter(ImageFilter.GaussianBlur(blur)), np.float32) / 255
-            shadow = np.vstack([np.zeros((dy, x1 - x0), np.float32), shadow[:-dy]])
-            k = (0.55 + 0.4 * (1 - bg_a)) * ta_scale * 1.6  # stronger the more see-through the panel
-            _over(region, None, np.clip(shadow * k, 0, 1))
-        t_rgb = np.asarray(text.rgb.crop(box), np.float32) / 255
-        t_a = np.asarray(crop_a, np.float32) / 255
-        _over(region, t_rgb * ta_scale, t_a * ta_scale)
-        out[y0:y1, x0:x1] = _to_u8(region)
-    if tools and (box := tools.a.getbbox()):
-        x0, y0, x1, y1 = box
-        region = out[y0:y1, x0:x1].astype(np.float32) / 255
-        _over(region, np.asarray(tools.rgb.crop(box), np.float32) / 255,
-              np.asarray(tools.a.crop(box), np.float32) / 255)
-        out[y0:y1, x0:x1] = _to_u8(region)
-    return out.tobytes(), rects
+        tb = (max(0, x - px(2)), px(4), w - px(6), px(8) + bh)
+        tools = Image.new("RGBA", (tb[2] - tb[0], tb[3] - tb[1]))
+        d = ImageDraw.Draw(tools)
+        d.rounded_rectangle((0, 0, tools.width - 1, tools.height - 1), px(8), fill=(*PANEL, 235))
+        for name, label in labels:
+            r = rects[name]
+            r = (r[0] - tb[0], r[1] - tb[1], r[2] - tb[0] - 1, r[3] - tb[1] - 1)
+            if name == hot:
+                d.rounded_rectangle(r, px(6), fill=(*_mix(PANEL, WHITE, 0.14), 235))
+            color = ACCENT if name == "tr" else WHITE if name == hot else _mix(PANEL, WHITE, 0.55)
+            d.text((r[0] + px(7), r[1] + px(4) + asc), label, font=f, fill=(*color, 255), anchor="ls")
+        out.alpha_composite(tools, tb[:2])
+    return out.convert("RGBa").tobytes("raw", "BGRa"), rects
 
 
 def _grow(box, m: int, w: int, h: int):
-    if not box:
-        return None
     return max(0, box[0] - m), max(0, box[1] - m), min(w, box[2] + m), min(h, box[3] + m)
 
 
-def _over(dst: np.ndarray, src_c: np.ndarray | None, src_a: np.ndarray) -> None:
-    """In place: premultiplied src over premultiplied BGRA dst (src_c None = black)."""
-    inv = 1 - src_a
-    dst[..., :3] *= inv[..., None]
-    if src_c is not None:
-        dst[..., :3] += src_c
-    dst[..., 3] = src_a + dst[..., 3] * inv
-
-
-def _to_u8(x: np.ndarray) -> np.ndarray:
-    x *= 255
-    x += 0.5
-    return np.clip(x, 0, 255, out=x).astype(np.uint8)
-
-
 @functools.lru_cache(maxsize=4)
-def _background(w: int, h: int, r: int, alpha: int, locked: bool) -> np.ndarray:
-    """Premultiplied BGRA panel. Unless click-through, alpha is never 0: pixels with alpha 0
+def _panel(w: int, h: int, r: int, alpha: int, locked: bool) -> Image.Image:
+    """The panel, straight RGBA. Unless click-through, alpha is never 0: pixels with alpha 0
     let clicks fall through, and the whole bar should stay grabbable."""
-    a = _round_mask(w, h, r) * (alpha / 255)
-    if not locked:
-        a = np.maximum(a, 1 / 255)
-    bgra = np.concatenate([BG[None, None, :] * (_round_mask(w, h, r) * (alpha / 255))[..., None], a[..., None]], axis=2)
-    return _to_u8(bgra.astype(np.float32))
+    floor = 0 if locked else 1
+    im = Image.new("RGBA", (w, h), (*PANEL, 0))
+    im.putalpha(_round_mask(w, h, r).point(lambda v: max(floor, round(v * alpha / 255))))
+    return im
 
 
 # ---------------------------------------------------------------- window
@@ -417,6 +418,11 @@ class CaptionBar:
                 self._drawn_lang = m["ui_lang"]
                 self._request_redraw()
             return
+        if m.get("type") == "clear":  # the user cleared the captions (main window)
+            with self._lock:
+                self._entries.clear()
+            self._request_redraw()
+            return
         if m.get("type") != "caption":
             return
         key = f"{m['stream']}:{m['utt']}"
@@ -425,7 +431,7 @@ class CaptionBar:
                 self._entries.pop(key, None)
             else:
                 self._entries[key] = {**self._entries.get(key, {}), **m}
-                while len(self._entries) > 12:
+                while len(self._entries) > KEEP:
                     self._entries.popitem(last=False)
         self._request_redraw()
 
@@ -526,7 +532,7 @@ class CaptionBar:
         if w <= 0 or h <= 0:
             return
         with self._lock:
-            entries = [dict(e) for e in list(self._entries.values())[-SHOW:]]
+            entries = [dict(e) for e in self._entries.values()]
             prefs = dict(self.prefs)
         data, self._rects = render(w, h, self._scale(), entries, prefs,
                                    hover=self._hover, hot=self._hot, locked=self._locked)

@@ -34,6 +34,7 @@ function render() {
 }
 store.addEventListener("entry", render);
 store.addEventListener("remove", render);
+store.addEventListener("clear", render);
 
 /* ---------------------------------------------------------------- toolbar */
 

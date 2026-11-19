@@ -8,9 +8,10 @@
 //        settings:{...}, sources:{other,me}, asr_ms, mt_ms, error, lag}
 //   {type:"levels", other, me}            (dBFS, ~10 Hz)
 //   {type:"devices", speakers:[name], mics:[name]}
+//   {type:"clear"}                         (the captions so far were cleared)
 // The page URL carries ?port=&token= from the desktop shell (livecapture/server.py).
 // Client -> server:
-//   {type:"control", action:"start"|"stop"}   {type:"set", key, value}
+//   {type:"control", action:"start"|"stop"}   {type:"set", key, value}   {type:"clear"}
 import { t } from "./i18n.js";
 
 export const PENDING = "…";
@@ -43,6 +44,9 @@ export class Store extends EventTarget {
     } else if (m.type === "devices") {
       this.devices = m;
       this.emit("devices");
+    } else if (m.type === "clear") {
+      this.entries.clear();  // a caption still being spoken comes back with its next update
+      this.emit("clear");
     }
   }
   emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
@@ -144,6 +148,7 @@ function runDemo(store) {
   return (msg) => { // demo "backend": honour target switches
     if (msg.type === "set") store.apply({ type: "status", [msg.key]: msg.value });
     if (msg.type === "control") store.apply({ type: "status", running: msg.action === "start" });
+    if (msg.type === "clear") store.apply({ type: "clear" });
   };
 }
 

@@ -21,10 +21,12 @@ Real-time captions and translation: what your computer plays ("Them") and your m
    - Press Start. The first start loads the models (a few seconds; the NPU edition optimizes
      the model for the NPU once, about a minute).
    - Choose the translation language at the top right.
-   - The floating caption bar can be dragged anywhere and resized at its edges; its buttons
-     appear on hover. Click-through lets clicks reach the window below; Ctrl+Alt+L turns it off.
+   - The floating caption bar can be dragged anywhere and resized at its edges (taller = more
+     of the earlier captions in view); its buttons appear on hover. Click-through lets clicks reach the window below; Ctrl+Alt+L turns it off.
    - Settings -> Caption bar: text and background opacity separately.
    - Closing the window keeps the app in the tray (bottom right); quit from the tray menu.
+   - Record saves both sides and the captions (also those from before you pressed it) to
+     Documents\Mitschrift Live; Clear (bottom bar) empties the window and the caption bar.
    - Speakers work (echo cancellation), headphones work best.
 
 4. Editions
@@ -56,10 +58,12 @@ Real-time captions and translation: what your computer plays ("Them") and your m
 3. 使用
    - 点"开始"。第一次启动要加载模型，几秒钟；NPU 版第一次会为 NPU 优化模型，约 1 分钟。
    - 右上角选择译文语言。
-   - 悬浮字幕条可以拖到任何位置、拖边缘改大小；鼠标移上去会出现按钮。
+   - 悬浮字幕条可以拖到任何位置、拖边缘改大小（拉高能同时看到更多前面的字幕）；鼠标移上去会出现按钮。
      "穿透"打开后点击会落到下面的窗口，按 Ctrl+Alt+L 关闭。
    - 设置 → 悬浮字幕：可以分别调文字和背景的不透明度。
    - 关掉主窗口后程序留在右下角托盘；从托盘菜单退出。
+   - "● 录音"把双方声音和字幕（也包括点录音之前的字幕）保存到 文档\Mitschrift Live；
+     底部的"清空"清掉主窗口和悬浮字幕条里的字幕。
    - 外放也能用（会自动消除回声），戴耳机效果最好。
 
 4. 版本

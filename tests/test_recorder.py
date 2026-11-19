@@ -22,7 +22,7 @@ def test_records_mp3_and_captions(tmp_path):
     rec.on_audio("other", tone[:512])  # late write after close: ignored
 
     files = sorted(p.name for p in rec.dir.iterdir())
-    assert files == ["captions.jsonl", "other.mp3"]  # "me" never got audio
+    assert files == ["captions.jsonl", "meta.json", "other.mp3"]  # "me" never got audio
     back, sr = sf.read(rec.dir / "other.mp3", dtype="float32")
     assert sr == SAMPLE_RATE and len(back) == len(tone)
     assert sf.info(rec.dir / "other.mp3").format == "MP3"
@@ -44,5 +44,5 @@ def test_falls_back_to_wav_without_mp3(tmp_path, monkeypatch):
     rec = Recorder(tmp_path, ["other"])
     rec.on_audio("other", np.zeros(1600, "float32"))
     rec.close()
-    assert sorted(p.name for p in rec.dir.iterdir()) == ["captions.jsonl", "other.wav"]
+    assert sorted(p.name for p in rec.dir.iterdir()) == ["captions.jsonl", "meta.json", "other.wav"]
     assert sf.info(rec.dir / "other.wav").frames == 1600

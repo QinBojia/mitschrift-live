@@ -75,6 +75,19 @@ store.addEventListener("remove", (ev) => {
   nodes.delete(ev.detail);
   updateCount();
 });
+store.addEventListener("clear", () => {
+  for (const el of nodes.values()) el.remove();
+  nodes.clear();
+  $("empty").style.display = "";
+  follow = true;
+  $("jump").style.display = "none";
+  updateCount();
+});
+// clear the captions here, in the caption bar and in what a later recording starts with
+$("clear").onclick = () => {
+  const n = [...store.entries.values()].filter((e) => e.final).length;
+  if (!store.entries.size || confirm(t("clear.confirm", { n }))) send({ type: "clear" });
+};
 
 list.addEventListener("scroll", () => {
   follow = list.scrollHeight - list.scrollTop - list.clientHeight < 60;
@@ -117,8 +130,10 @@ function renderStatus() {
   const rec = $("rec");
   rec.classList.toggle("armed", !!s.record_on && !s.recording);
   rec.classList.toggle("live", !!s.recording);
+  rec.classList.toggle("paused", !!s.recording && !s.running);  // the recording goes on (silence) while paused
   const mm = (n) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}`;
-  rec.textContent = s.recording ? t("rec.live", { t: mm(s.record_secs || 0) }) : s.record_on ? t("rec.armed") : t("rec");
+  rec.textContent = s.recording ? t(s.running ? "rec.live" : "rec.paused", { t: mm(s.record_secs || 0) })
+    : s.record_on ? t("rec.armed") : t("rec");
   rec.disabled = !s.connected;
   $("openRec").hidden = !s.last_recording;
   $("stats").innerHTML = s.loading

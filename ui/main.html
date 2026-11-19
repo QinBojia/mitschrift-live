@@ -100,6 +100,7 @@
   #rec { color: var(--text-2); }
   #rec.armed { color: var(--err); border-color: color-mix(in srgb, var(--err) 55%, var(--line)); }
   #rec.live { color: #fff; background: var(--err); border-color: var(--err); animation: recpulse 1.6s infinite; }
+  #rec.live.paused { animation: none; background: color-mix(in srgb, var(--err) 55%, transparent); }
   @keyframes recpulse { 50% { background: color-mix(in srgb, var(--err) 70%, transparent); } }
   .notice { color: var(--accent); }
   .keyrow { display: flex; gap: 6px; }
@@ -138,6 +139,7 @@
   <button data-export="txt" data-i18n="export.txt">导出 TXT</button>
   <button data-export="srt">SRT</button>
   <button data-export="md">Markdown</button>
+  <button id="clear" data-i18n="clear" data-i18n-title="clear.title">清空</button>
   <button id="openRec" hidden data-i18n="openRec" data-i18n-title="openRec.title">打开录音文件夹</button>
   <span class="count" id="count"></span>
 </footer>
