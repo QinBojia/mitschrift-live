@@ -178,7 +178,7 @@ Two engines want a converted encoder, made once with the scripts in `bench/`
 - **⚙ Settings**: interface language, devices (default: follow Windows), echo cancellation,
   engine, Chinese detection, translation model, API keys and scene, caption bar font size and
   text / background opacity.
-- **● Record**: both sides plus captions to `Documents\Mitschrift Live`.
+- **● Record**: both sides (MP3, ~30 MB per hour each) plus captions to `Documents\Mitschrift Live`.
 - Closing the window keeps the app running in the tray; quit from the tray menu.
 
 Settings, keys and logs live in `~/.livecapture` (`settings.json`, `ui.json`, `keys.json`,

@@ -159,7 +159,7 @@ key 也可以来自环境变量（`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`），
   Ctrl+Alt+F12，设置里会显示实际是哪个）。
 - **⚙ 设置**：界面语言、设备（默认跟随 Windows）、回声消除、识别引擎、中文识别、翻译模型、
   API key 和场景、字幕条字号和文字 / 背景不透明度。
-- **● 录音**：把双方声音和字幕保存到 `文档\Mitschrift Live`。
+- **● 录音**：把双方声音（MP3，每路每小时约 30 MB）和字幕保存到 `文档\Mitschrift Live`。
 - 关闭主窗口后程序留在托盘继续运行；从托盘菜单退出。
 
 设置、key 和日志在 `~/.livecapture`（`settings.json`、`ui.json`、`keys.json`、`logs/live-capture.log`）。

@@ -9,7 +9,7 @@ requires-python = ">=3.12"
 dependencies = [
     "onnx-asr[hub]>=0.12",
     "numpy",
-    "soundfile",
+    "soundfile>=0.13",  # MP3 writing (recordings)
     "soxr",
     "pyaudiowpatch",
     "rich",

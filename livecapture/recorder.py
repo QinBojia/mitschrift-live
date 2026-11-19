@@ -1,6 +1,12 @@
-"""Session recording: 16 kHz WAV per stream + finished captions (with translation) as JSONL.
+"""Session recording: 16 kHz mono MP3 per stream + finished captions (with translation) as JSONL.
 
-Useful for re-testing and for re-calibrating the int8 NPU model on real meeting audio.
+MP3 at 64 kbps constant bitrate: ~29 MB per hour and stream instead of 115 MB as 16-bit WAV,
+and plenty for speech at 16 kHz. Decoded, it has exactly the samples that were written, so
+caption times still line up. Encoding costs ~2 ms per second of audio. Replaying a recording
+(`--file`) recognizes slightly differently than live, because MP3 is lossy; a higher bitrate
+doesn't change that (bench test 2026-11-19: 64-160 kbps all alike). If this soundfile /
+libsndfile can't write MP3, the recorder falls back to WAV.
+
 Writes come from the audio threads while the UI may close the recorder at any time, so
 everything goes through one lock and late writes after close() are dropped.
 """
@@ -20,6 +26,25 @@ from . import SAMPLE_RATE
 from .segmenter import Caption
 
 DEFAULT_DIR = Path.home() / "Documents" / "Mitschrift Live"
+MP3_KBPS = 64
+
+
+def _mp3_level(kbps: int) -> float:
+    """libsndfile's constant-bitrate compression level for 16-24 kHz audio (MPEG-2 Layer III):
+    bitrate = 160 - level * (160 - 8) kbps."""
+    return (160 - kbps) / 152
+
+
+def open_audio(path_stem: Path) -> sf.SoundFile:
+    """`<stem>.mp3` for writing, or `<stem>.wav` if MP3 isn't available."""
+    mp3 = path_stem.with_name(path_stem.name + ".mp3")
+    try:
+        return sf.SoundFile(mp3, "w", samplerate=SAMPLE_RATE, channels=1, format="MP3",
+                            bitrate_mode="CONSTANT", compression_level=_mp3_level(MP3_KBPS))
+    except (sf.LibsndfileError, TypeError, ValueError):  # libsndfile < 1.1 / soundfile < 0.13
+        mp3.unlink(missing_ok=True)
+        return sf.SoundFile(path_stem.with_name(path_stem.name + ".wav"), "w", samplerate=SAMPLE_RATE,
+                            channels=1, subtype="PCM_16")
 
 
 class Recorder:
@@ -27,10 +52,7 @@ class Recorder:
         stamp = time.strftime("%Y%m%d-%H%M%S")
         self.dir = Path(out_dir) / stamp
         self.dir.mkdir(parents=True, exist_ok=True)
-        self._wavs = {
-            s: sf.SoundFile(self.dir / f"{s}.wav", "w", samplerate=SAMPLE_RATE, channels=1, subtype="PCM_16")
-            for s in streams
-        }
+        self._wavs = {s: open_audio(self.dir / s) for s in streams}
         self._jsonl = (self.dir / "captions.jsonl").open("w", encoding="utf-8")
         self._lock = threading.Lock()
         self._closed = False
@@ -53,9 +75,9 @@ class Recorder:
             if self._closed:
                 return
             self._closed = True
-            for s, w in self._wavs.items():
+            for w in self._wavs.values():
                 frames = w.frames
                 w.close()
                 if frames == 0:  # e.g. mic not used: don't leave an empty file behind
-                    (self.dir / f"{s}.wav").unlink(missing_ok=True)
+                    Path(w.name).unlink(missing_ok=True)
             self._jsonl.close()

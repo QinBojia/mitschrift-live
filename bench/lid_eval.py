@@ -50,7 +50,7 @@ def main() -> None:
         print(f"{win:4.1f}s  | " + " | ".join(cells))
     print("SenseVoice CPU ms per call:", {w: round(statistics.median(v)) for w, v in timings.items()})
 
-    for rec in sorted((HERE / "recordings").glob("*/other.wav")):
+    for rec in sorted((HERE / "recordings").glob("*/other.*")):  # .mp3, or .wav in older recordings
         a = sf.read(rec, dtype="float32")[0]
         print(f"\n== {rec.parent.name} ({len(a) / SR:.0f}s), 3 s windows with speech:")
         for s in range(0, len(a) - 3 * SR, 3 * SR):

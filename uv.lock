@@ -903,7 +903,7 @@ requires-dist = [
     { name = "pystray" },
     { name = "pywebview" },
     { name = "rich" },
-    { name = "soundfile" },
+    { name = "soundfile", specifier = ">=0.13" },
     { name = "soxr" },
     { name = "websockets" },
 ]

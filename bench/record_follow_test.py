@@ -40,11 +40,11 @@ def recording_test(tmp: Path) -> None:
     time.sleep(2)
     b.stop()
     d = Path(b.last_recording)
-    wav = d / "other.wav"
+    wav = next(d.glob("other.*"))  # other.mp3, or other.wav in older recordings
     lines = (d / "captions.jsonl").read_text(encoding="utf-8").splitlines()
     info = sf.info(wav)
-    print(f"[record] replay done={ok} folder={d.name} other.wav={info.duration:.1f}s "
-          f"me.wav exists={(d / 'me.wav').exists()} captions={len(lines)}")
+    print(f"[record] replay done={ok} folder={d.name} {wav.name}={info.duration:.1f}s "
+          f"me file exists={any(d.glob('me.*'))} captions={len(lines)}")
     print(f"         first: {json.loads(lines[0])['committed'][:50]} -> {json.loads(lines[0])['translation']}")
     b.shutdown()
 
