@@ -7,8 +7,9 @@ Record something with the app (● Record), put its subtitles next to it, then:
 
 `run` writes <recording dir>/eval/<engine>.txt; `score` aligns those (and "live": what the app
 wrote into captions.jsonl while recording) with the subtitle text, word by word. Times are
-not used, so the subtitles need not be in sync; the reference ends at the last subtitle word
-the first listed transcript still matches (where the recording stops).
+not used, so the subtitles need not be in sync, and the recording may be any part of the
+film: the stretch of subtitles it covers is found by its text (from the first to the last
+subtitle word that any listed transcript matches).
 
 Subtitles: a Language Reactor export (.xlsx, columns Time / Subtitle) or a plain text file.
 Subtitles are not word-for-word, so the absolute error rates are high - compare engines.
@@ -94,6 +95,35 @@ def align(ref: list[str], hyp: list[str]) -> list[tuple[str, int, int]]:
     return ops[::-1]
 
 
+def locate(ref: list[str], hyp: list[str]) -> tuple[int, int]:
+    """The slice of `ref` that `hyp` is a transcript of (generous at both ends), found by
+    the three-word sequences they share."""
+    grams = {tuple(hyp[i : i + 3]) for i in range(len(hyp) - 2)}
+    hits = [tuple(ref[i : i + 3]) in grams for i in range(max(0, len(ref) - 2))]
+    span = min(len(hits), int(len(hyp) * 1.3) + 50)
+    total = sum(hits[:span])
+    best, start = total, 0
+    for i in range(1, len(hits) - span + 1):
+        total += hits[i + span - 1] - hits[i - 1]
+        if total > best:
+            best, start = total, i
+    return max(0, start - 50), min(len(ref), start + span + 50)
+
+
+def anchors(ops: list[tuple[str, int, int]]) -> list[int]:
+    """Reference positions inside runs of >= 3 matching words in a row. A single matching
+    word far outside the recording (the alignment may park one there) is not an anchor."""
+    out, run = [], []
+    for op, i, _ in [*ops, ("x", 0, 0)]:
+        if op == "=":
+            run.append(i)
+        else:
+            if len(run) >= 3:
+                out += run
+            run = []
+    return out
+
+
 def transcript(rec: Path, name: str) -> list[str]:
     if name == "live":
         lines = [json.loads(line) for line in (rec / "captions.jsonl").read_text(encoding="utf-8").splitlines()]
@@ -103,10 +133,11 @@ def transcript(rec: Path, name: str) -> list[str]:
 
 def score(rec: Path, subs: Path, names: list[str], show_runs: bool) -> None:
     ref_all = reference(subs)
-    ref_all = ref_all[: 2 * len(transcript(rec, names[0])) + 200]  # the recording may cover only the start
-    end = max(i for op, i, _ in align(ref_all, transcript(rec, names[0])) if op == "=") + 1
-    ref = ref_all[:end]
-    print(f"reference: {len(ref)} subtitle words\n")
+    a, b = locate(ref_all, transcript(rec, names[0]))
+    window = ref_all[a:b]
+    matched = [i for name in names for i in anchors(align(window, transcript(rec, name)))]
+    ref = window[min(matched) : max(matched) + 1]
+    print(f"reference: {len(ref)} subtitle words (words {a + min(matched)}-{a + max(matched)} of {len(ref_all)})\n")
     print(f"{'transcript':24s} {'words':>6s} {'missing':>14s} {'wrong':>13s} {'extra':>12s} {'WER':>7s}   passages of >= 5 missing words")
     for name in names:
         hyp = transcript(rec, name)
