@@ -81,6 +81,7 @@ English alternating), which `backend_test.py` and other end-to-end checks replay
 | `codeswitch_probe.py` | What happens to German words inside Chinese sentences. |
 | `echo_eval.py` | The speaker-echo scenario with echo handling off / on. |
 | `translate_eval.py` | Latency, quality and token use of the translation backends (makes real API calls). |
+| `mt_compare.py` | Translation backends on a recording's real captions: latency, and the translations side by side in `<recording>/eval/mt_compare.md` (real API calls). |
 
 ## Desktop app checks
 

@@ -169,6 +169,7 @@ function applyEdition(s) {
     model.closest(".field").hidden = ed.models.length <= 1;
     // a build that only translates with DeepSeek has no use for a Claude key
     document.querySelector('.keybox[data-provider="anthropic"]').hidden = !ed.models.some((m) => m.startsWith("claude"));
+    document.querySelector('.keybox[data-provider="azure"]').hidden = !ed.models.includes("azure-translator");
   }
   $("about").textContent = `随堂字幕 Mitschrift Live ${s.version ?? ""}${ed.name !== "dev" ? ` · ${ed.name}` : ""} · ${t("about.data")} ${s.data_dir ?? ""}`;
 }
@@ -179,6 +180,7 @@ function applySettings(cfg) {
   setVal("set-engine", cfg.engine);
   setVal("set-model", cfg.model);
   setVal("set-scene", cfg.scene);
+  setVal("set-azure_region", cfg.azure_region ?? "");
   setVal("set-speaker", cfg.speaker ?? "");
   setVal("set-mic", cfg.mic ?? "");
   setVal("set-ui_lang", cfg.ui_lang ?? "auto");
@@ -255,8 +257,9 @@ for (const sw of document.querySelectorAll(".switch")) {
 // desktop shell -> page: keep the click-through switch in sync (global hotkey, caption-bar button)
 window.__setLock = (on) => document.querySelector('.switch[data-k="clickThrough"]').classList.toggle("on", on);
 for (const [id, key] of [["set-engine", "engine"], ["set-model", "model"], ["set-scene", "scene"],
-                         ["set-speaker", "speaker"], ["set-mic", "mic"], ["set-ui_lang", "ui_lang"]]) {
-  $(id).onchange = (ev) => send({ type: "set", key, value: ev.target.value });
+                         ["set-speaker", "speaker"], ["set-mic", "mic"], ["set-ui_lang", "ui_lang"],
+                         ["set-azure_region", "azure_region"]]) {
+  $(id).onchange = (ev) => send({ type: "set", key, value: ev.target.value.trim() });
 }
 // caption-bar look: drawn by the desktop shell, live while dragging the sliders
 $("set-font").oninput = (ev) => api()?.set_bar_pref?.("font", Number(ev.target.value));

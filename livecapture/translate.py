@@ -102,11 +102,90 @@ def user_prompt(text: str, src: str, context: list[tuple[str, str, str]]) -> str
     )
 
 
-def make_backend(model: str, scene: str | None = DEFAULT_SCENE):
-    """Pick the provider from the model name: deepseek-* -> DeepSeek, otherwise Claude."""
+def make_backend(model: str, scene: str | None = DEFAULT_SCENE, azure_region: str = ""):
+    """Pick the provider from the model name: deepseek-* -> DeepSeek, azure-translator ->
+    Microsoft Translator, otherwise Claude."""
     if model.startswith("deepseek"):
         return DeepSeekBackend(model, scene=scene)
+    if model == AzureBackend.model:
+        return AzureBackend(azure_region)
     return ClaudeBackend(model, scene=scene)
+
+
+class AzureBackend:
+    """Microsoft Translator (Azure AI Translator, REST API v3): machine translation, not an
+    LLM - about 0.1-0.3 s a sentence instead of ~0.7-0.9 s, but sentence by sentence: no
+    context lines, no scene, and misrecognized words are translated as they are.
+
+    Key: AZURE_TRANSLATOR_KEY (or Settings -> Translation). A resource created in a region
+    (e.g. eastasia) also needs that region (settings, or AZURE_TRANSLATOR_REGION); a "global"
+    one doesn't. Standard library HTTP with one kept-alive connection per worker thread (a new
+    TLS connection per sentence would cost as much as the translation), through the system's
+    HTTPS proxy if one is set."""
+
+    model = "azure-translator"
+    HOST = "api.cognitive.microsofttranslator.com"
+    TO = {"zh": "zh-Hans", "en": "en", "de": "de"}
+
+    def __init__(self, region: str = ""):
+        import urllib.request
+
+        key = keys.get("azure")
+        if not key:
+            raise TranslationUnavailable(tr("mt.no_key", provider="Microsoft Translator"))
+        self.headers = {"Ocp-Apim-Subscription-Key": key, "Content-Type": "application/json; charset=UTF-8"}
+        region = (region or keys.region("azure") or "").strip()
+        if region and region.lower() != "global":
+            self.headers["Ocp-Apim-Subscription-Region"] = region
+        self.proxy = urllib.request.getproxies().get("https")
+        self._local = threading.local()
+        self.usage = collections.Counter()  # characters sent (the service bills per character)
+
+    def _connection(self):
+        import http.client
+        import urllib.parse
+
+        c = getattr(self._local, "conn", None)
+        if c is None:
+            if self.proxy:
+                p = urllib.parse.urlsplit(self.proxy if "://" in self.proxy else "http://" + self.proxy)
+                c = http.client.HTTPSConnection(p.hostname, p.port or 80, timeout=10)
+                c.set_tunnel(self.HOST, 443)
+            else:
+                c = http.client.HTTPSConnection(self.HOST, timeout=10)
+            self._local.conn = c
+        return c
+
+    def __call__(self, text: str, src: str, target: str, context) -> str:
+        import http.client
+        import json
+        import urllib.parse
+
+        params = {"api-version": "3.0", "to": self.TO[target]}
+        if src == "zh":  # SenseVoice is sure of Chinese; for de/en (a guess) the service detects
+            params["from"] = "zh-Hans"
+        path = "/translate?" + urllib.parse.urlencode(params)
+        body = json.dumps([{"Text": text}], ensure_ascii=False).encode("utf-8")
+        for attempt in (1, 2):  # a kept-alive connection the server has closed: once more on a new one
+            c = self._connection()
+            try:
+                c.request("POST", path, body=body, headers=self.headers)
+                r = c.getresponse()
+                data = r.read()
+                break
+            except (http.client.HTTPException, OSError):
+                c.close()
+                self._local.conn = None
+                if attempt == 2:
+                    raise
+        if r.status in (401, 403):
+            if b"403001" in data:  # the free tier's 2 million characters of the month are used up
+                raise TranslationUnavailable(tr("mt.quota", provider="Microsoft Translator"))
+            raise TranslationUnavailable(tr("mt.bad_key", provider="Microsoft Translator", code=r.status))
+        if r.status != 200:
+            raise RuntimeError(f"Microsoft Translator {r.status}: {data[:200].decode('utf-8', 'replace')}")
+        self.usage["chars"] += len(text)
+        return json.loads(data)[0]["translations"][0]["text"].strip()
 
 
 class ClaudeBackend:

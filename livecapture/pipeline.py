@@ -39,6 +39,7 @@ class Settings:
     target: str = "zh"  # zh | en | off
     model: str = "deepseek-flash"
     scene: str = DEFAULT_SCENE
+    azure_region: str = ""  # Microsoft Translator: the resource's region ("" = global / AZURE_TRANSLATOR_REGION)
     aec: bool = True
     echo_filter: bool = True
     zh: bool = True  # Chinese detection / SenseVoice
@@ -282,7 +283,7 @@ class Pipeline:
         if not self.translator:
             return None
         try:
-            self.translator.set_backend(make_backend(model, scene))
+            self.translator.set_backend(make_backend(model, scene, self.settings.azure_region))
             return None
         except Exception as e:  # noqa: BLE001 - missing key, unknown model, ...
             self.translator.set_backend(_NoBackend())

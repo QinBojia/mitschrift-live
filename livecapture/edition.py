@@ -16,6 +16,10 @@ from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 _MASK = b"live-capture/friends"
+# offered by every edition, also one whose edition.json lists fewer models (the friends' builds
+# up to 0.3.2: DeepSeek only) - an update brings them to those installs too. They use the
+# user's own key (Settings -> Translation); no edition bundles one.
+ALWAYS_MODELS = ("claude-haiku-5-5", "azure-translator")
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,8 @@ def load(path: Path = APP_ROOT / "edition.json") -> Edition:
     for k in ("models", "engines"):
         if data.get(k) is not None:
             data[k] = tuple(data[k])
+    if data.get("models") is not None:
+        data["models"] += tuple(m for m in ALWAYS_MODELS if m not in data["models"])
     return Edition(**{k: v for k, v in data.items() if k in Edition.__dataclass_fields__})
 
 

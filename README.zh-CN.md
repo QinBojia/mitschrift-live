@@ -31,7 +31,8 @@ Windows 上的实时字幕和翻译。它同时听电脑里播放的声音（Zoo
 不需要管理员权限。体积很小的 `…-Update.exe` 更新包可以直接升级任何版本，不用重装。
 
 翻译需要在程序里点 ⚙ → 翻译，粘贴一个 [DeepSeek](https://platform.deepseek.com/)（默认，便宜）或
-[Anthropic](https://console.anthropic.com/) 的 API key。没有 key 也能看字幕。
+[Anthropic](https://console.anthropic.com/) 的 API key，或者 Azure
+[翻译资源](https://learn.microsoft.com/azure/ai-services/translator/)的 key（机器翻译，见下文）。没有 key 也能看字幕。
 
 ## 功能
 
@@ -42,7 +43,7 @@ Windows 上的实时字幕和翻译。它同时听电脑里播放的声音（Zoo
   SenseVoice Small 识别。
 - **边说边出字，一句一条**：每句话说完约 1.5 秒后就定稿成一条字幕并立刻翻译，对方不停顿也一样。
 - **逐句翻译**：带上前几句作为上下文，并告诉模型场景（默认 *a German language class*）。
-  支持 DeepSeek 和 Claude；译文可选 中文 / English / Deutsch，或关闭。
+  支持 DeepSeek、Claude 和微软翻译（Microsoft Translator）；译文可选 中文 / English / Deutsch，或关闭。
 - **外放也能用**：用 WebRTC 回声消除处理麦克风（以系统声音为参考），再加一层文字级的回声过滤。
 - **悬浮字幕条**：总在最上层，不抢 Zoom 的焦点；可以开"鼠标穿透"，用全局快捷键 Ctrl+Alt+L 切换；
   文字和背景的不透明度分开调。
@@ -59,7 +60,7 @@ API key 用 Windows DPAPI 为当前用户加密保存。
                           ├─> 16 kHz ─> Silero VAD ─> 分句器 ─┬─> Parakeet   （德 / 英 / …）
 麦克风 ─> 回声消除 ────────┘                                  └─> SenseVoice （中文 + 语种识别）
                                                                        │
-                              字幕 ─> 翻译（DeepSeek / Claude）─> WebSocket ─> 主窗口（WebView2）
+                              字幕 ─> 翻译（DeepSeek / Claude / 微软）─> WebSocket ─> 主窗口（WebView2）
                                                                        └─> 字幕条（原生绘制，逐像素透明）
 ```
 
@@ -102,7 +103,10 @@ API key 用 Windows DPAPI 为当前用户加密保存。
 另外，在一段单人长时间讲话的录音里，现成的 int8 编码器有 10.5% 的 12 秒窗口只识别出不到六成的词
 （新编码器是 0.9%），表现出来就是整段话丢失。
 
-每句翻译的延迟：DeepSeek `deepseek-flash` 中位数约 0.7 秒，Claude Haiku 约 0.9 秒。
+每句翻译的延迟：DeepSeek `deepseek-flash` 中位数约 0.7 秒，Claude Haiku 约 1.0 秒，微软翻译约 0.1 秒
+（`bench/mt_compare.py`，两部电视剧各 40 句译成中文）。微软翻译是机器翻译，不是大模型：识别正确的句子
+翻得和大模型差不多，但它看不到前文和场景，识别错的词会照着直译，称呼的语气也可能不对（大约每 10 句有
+1 句明显更差）。免费档（F0）每月 200 万字符，一节课每小时大约 4–5 万字符。
 原始数据在 `bench/results/*.json`，测法见 [`bench/README.md`](bench/README.md)。
 
 ## 从源码运行
@@ -145,7 +149,8 @@ ui.bat
 - `ui.bat --autostart`：启动后直接开始识别。
 - `run.bat --engine cpu`：在终端里显示字幕（全部参数见 `run.bat --help`）。
 
-key 也可以来自环境变量（`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`），优先级：进程环境变量 >
+key 也可以来自环境变量（`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`、`AZURE_TRANSLATOR_KEY`；按区域创建的
+微软翻译资源还要 `AZURE_TRANSLATOR_REGION`，或者在设置里填区域），优先级：进程环境变量 >
 程序里保存的 key > 用户环境变量（`setx`）。
 
 ### 模型
@@ -176,7 +181,8 @@ key 也可以来自环境变量（`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`），
   系统声音仍会被采集，用作麦克风的回声参考，但不会被转写。）
 - **悬浮字幕**：显示 / 隐藏字幕条。拖动字幕条本身可以移动，拖边缘可以改大小；鼠标移上去会出现
   按钮（A− A+ 显示内容 穿透 ×）。最新的字幕在最下面，前面的字幕往上填满整个字幕条：拉高字幕条就能
-  同时看到更多前文。显示内容有三档：原文加译文、仅原文、仅译文（选仅译文时，译文出来之前
+  同时看到更多前文。所有行都是同一个字号（就是设置里的字号），不分语言；原文粗体、译文常规；每句左边一条
+  彩色竖线表示是谁说的（青色是对方 / 现场，绿色是我）。显示内容有三档：原文加译文、仅原文、仅译文（选仅译文时，译文出来之前
   先用较淡的颜色显示原文）。
 - **穿透**：点击会落到下面的窗口。按 **Ctrl+Alt+L** 关闭（被占用时改用 Ctrl+Alt+C 或
   Ctrl+Alt+F12，设置里会显示实际是哪个）。
@@ -209,7 +215,7 @@ livecapture/      程序本体
   stt.py            Parakeet：cuda / npu / dml / cpu
   sensevoice.py     中文识别 + 语种识别
   echo.py           回声消除和回声过滤
-  translate.py      DeepSeek / Claude 翻译
+  translate.py      DeepSeek / Claude / 微软翻译
   keys.py           API key：环境变量、程序内加密保存
   i18n.py           Python 一侧的界面语言（页面用 ui/i18n.js）
   caption_bar.py    原生悬浮字幕条
@@ -230,7 +236,8 @@ build/            Windows 安装包工具（见下）
 uv run python build/build_installer.py --edition cpu --installer
 ```
 
-`--friends` 生成给信任的人用的私人版本：中文界面、只用 DeepSeek、内嵌 `FRIENDS_DEEPSEEK_KEY` 里的 key。
+`--friends` 生成给信任的人用的私人版本：中文界面、DeepSeek 用内嵌的 `FRIENDS_DEEPSEEK_KEY`（Claude Haiku
+和微软翻译用他们自己的 key）。
 key 只做了混淆，拿到安装包的人都能取出来：用一个单独的、设了消费上限的 key，并且不要公开发布这类安装包。
 
 ## 已知限制

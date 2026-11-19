@@ -4,8 +4,8 @@ recognition on the CPU (--edition cpu), an Intel NPU (--edition npu) or integrat
 via DirectML (--edition amd), the last two with CPU fallback.
 
 Public builds (default) contain no API key: users enter their own in the app.
---friends builds a private variant for people you trust: DeepSeek only, with a key bundled
-from FRIENDS_DEEPSEEK_KEY (else DEEPSEEK_API_KEY). The key is only obfuscated - anyone with
+--friends builds a private variant for people you trust: DeepSeek with a key bundled from
+FRIENDS_DEEPSEEK_KEY (else DEEPSEEK_API_KEY), plus Claude Haiku with the user's own key. The key is only obfuscated - anyone with
 the installer can extract it - so use a separate key with a spending limit and never
 publish such builds.
 
@@ -166,8 +166,10 @@ def copy_app(edition: str, friends: bool) -> None:
     ed = EDITIONS[edition]
     info = {"name": f"{'friends' if friends else 'public'}-{edition}", "engines": ed["engines"], "engine": ed["engine"]}
     if friends:
-        info.update(models=["deepseek-flash"], default_model="deepseek-flash", deepseek_key=hide(deepseek_key()),
-                    ui_lang="zh")
+        # DeepSeek with the bundled key; Claude Haiku and Microsoft Translator with the user's
+        # own key (edition.ALWAYS_MODELS)
+        info.update(models=["deepseek-flash", "claude-haiku-5-5", "azure-translator"], default_model="deepseek-flash",
+                    deepseek_key=hide(deepseek_key()), ui_lang="zh")
     (app / "edition.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
     save_app_icon(DIST / "live-capture.ico")
     shutil.copy2(ROOT / "build" / notes_file(friends), DIST / notes_file(friends))

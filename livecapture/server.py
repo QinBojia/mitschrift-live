@@ -410,7 +410,7 @@ class Backend:
             elif not self.record_on:
                 self._close_recorder()
             return
-        if key == "api_key":  # {"provider": "deepseek" | "anthropic", "key": "..."}; "" forgets it
+        if key == "api_key":  # {"provider": "deepseek" | "anthropic" | "azure", "key": "..."}; "" forgets it
             keys.save(str(value.get("provider")), value.get("key"))
             self._key_status = keys.status()
             if self.pipeline and self.pipeline.running:  # new key takes effect right away
@@ -430,9 +430,11 @@ class Backend:
             if running:
                 self.pipeline.set_target(value)
             self._record_event("target", value=value)
-        elif key in ("model", "scene"):
+        elif key in ("model", "scene", "azure_region"):
             if running:
                 self.pipeline.set_model(s.model, s.scene)
+            if key == "model":
+                self._record_event("model", value=value)
         elif key in Settings.RESTART_KEYS:
             if running:
                 self.stop()

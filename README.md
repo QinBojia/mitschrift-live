@@ -37,7 +37,9 @@ anyway"). They install for the current user only, no admin rights needed. Small
 
 For translation, open the app, click ⚙ → Translation and paste a
 [DeepSeek](https://platform.deepseek.com/) (default, inexpensive) or
-[Anthropic](https://console.anthropic.com/) API key. Without a key you still get captions.
+[Anthropic](https://console.anthropic.com/) API key, or a key of an Azure
+[Translator](https://learn.microsoft.com/azure/ai-services/translator/) resource (machine
+translation, see below). Without a key you still get captions.
 
 ## Features
 
@@ -51,7 +53,7 @@ For translation, open the app, click ⚙ → Translation and paste a
   sentence becomes its own caption about 1.5 s after it ends, even when the speaker doesn't
   pause, and is translated right away.
 - **Sentence-by-sentence translation** with the previous lines as context and a "scene" hint
-  (default: *a German language class*). DeepSeek or Claude; target 中文 / English / Deutsch, or off.
+  (default: *a German language class*). DeepSeek, Claude or Microsoft Translator; target 中文 / English / Deutsch, or off.
 - **Works with speakers, not just headphones.** WebRTC echo cancellation on the microphone
   (system audio as reference) plus a text-level echo filter.
 - **Floating caption bar.** Always on top, never steals focus from Zoom, click-through mode
@@ -71,7 +73,7 @@ system audio (loopback) ───────┐
                                ├─> 16 kHz ─> Silero VAD ─> segmenter ─┬─> Parakeet   (de / en / …)
 microphone ─> echo cancel ─────┘                                      └─> SenseVoice (zh + language ID)
                                                                                │
-                                     captions ─> translator (DeepSeek / Claude) ─> WebSocket ─> main window (WebView2)
+                                     captions ─> translator (DeepSeek / Claude / MS) ─> WebSocket ─> main window (WebView2)
                                                                                └─> caption bar (native, per-pixel alpha)
 ```
 
@@ -120,7 +122,12 @@ official subtitles, which are not word-for-word, so the absolute numbers are hig
 The ready-made int8 encoder also returned fewer than 60 % of the words for 10.5 % of the 12 s
 windows of a monologue (the new one: 0.9 %), which showed as whole passages missing.
 
-Translation latency per sentence: DeepSeek `deepseek-flash` ~0.7 s median, Claude Haiku ~0.9 s.
+Translation latency per sentence: DeepSeek `deepseek-flash` ~0.7 s median, Claude Haiku ~1.0 s,
+Microsoft Translator ~0.1 s (`bench/mt_compare.py`, 40 captions each of two TV dramas into
+Chinese). Microsoft Translator is machine translation, not an LLM: as good as the LLMs on
+well-recognized sentences, but it gets no context lines or scene, so misrecognized words are
+translated as they are and forms of address can be off (~1 sentence in 10 clearly worse).
+Its free tier (F0) covers 2 million characters a month - a lecture is ~40-50 thousand an hour.
 Raw numbers are in `bench/results/*.json`; how they were made is in [`bench/README.md`](bench/README.md).
 
 ## Run from source
@@ -165,7 +172,9 @@ Other ways to start it:
 - `ui.bat --autostart`: start capturing right away.
 - `run.bat --engine cpu`: captions in the terminal (`run.bat --help` for all options).
 
-Keys can also come from environment variables (`DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`); the
+Keys can also come from environment variables (`DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`,
+`AZURE_TRANSLATOR_KEY`, plus `AZURE_TRANSLATOR_REGION` for a regional Translator resource -
+or enter the region in the settings); the
 order is: process environment, key saved in the app, user environment (`setx`).
 
 ### Models
@@ -201,7 +210,9 @@ The engines work best with converted encoders, made once with the scripts in `be
 - **Caption bar**: show / hide it. Drag it by its body, resize it at its edges; its buttons
   (A− A+, what to show, click-through, ×) appear on hover. The newest caption is at the
   bottom and earlier ones fill the space above it: drag the bar taller to keep more of
-  what was said in view. It can show original and
+  what was said in view. Every line has the same size (the font size setting), whatever its
+  language; the original is bold, a translation regular, and a coloured bar left of each
+  caption shows who spoke (teal: them / room, green: me). It can show original and
   translation, the original only, or the translation only (the original then stands in,
   dimmed, until its translation arrives).
 - **Click-through**: clicks go to the window below. Turn it off with **Ctrl+Alt+L**
@@ -241,7 +252,7 @@ livecapture/      the app
   stt.py            Parakeet on cuda / npu / dml / cpu
   sensevoice.py     Chinese recognition + language ID
   echo.py           echo cancellation and echo filter
-  translate.py      DeepSeek / Claude translation
+  translate.py      DeepSeek / Claude / Microsoft Translator translation
   keys.py           API keys: environment, encrypted in-app storage
   i18n.py           interface language for the Python side (ui/i18n.js for the page)
   caption_bar.py    the native floating caption bar
@@ -262,8 +273,8 @@ edition: `--edition cpu`, `npu` or `amd`. `--patch` builds the small code-only u
 uv run python build/build_installer.py --edition cpu --installer
 ```
 
-`--friends` builds a private variant for people you trust: Chinese interface, DeepSeek only,
-with a key bundled from `FRIENDS_DEEPSEEK_KEY`. That key is only obfuscated and anyone with
+`--friends` builds a private variant for people you trust: Chinese interface, DeepSeek with a
+key bundled from `FRIENDS_DEEPSEEK_KEY` (Claude Haiku and Microsoft Translator with their own key). That key is only obfuscated and anyone with
 the installer can extract it: use a separate key with a spending limit and never publish
 such builds.
 

@@ -1,7 +1,7 @@
 """Translation API keys: where they come from, and keys typed into the app.
 
-Lookup order for a provider ("deepseek" / "anthropic"):
-  1. environment variable of this process (DEEPSEEK_API_KEY / ANTHROPIC_API_KEY)
+Lookup order for a provider ("deepseek" / "anthropic" / "azure"):
+  1. environment variable of this process (DEEPSEEK_API_KEY / ANTHROPIC_API_KEY / AZURE_TRANSLATOR_KEY)
   2. key saved in the app: ~/.livecapture/keys.json, encrypted with Windows DPAPI for the
      current Windows user (another user or machine cannot decrypt it)
   3. key bundled with a private "friends" build (edition.json, obfuscated only)
@@ -21,7 +21,8 @@ from ctypes import wintypes
 from . import models
 from .edition import EDITION
 
-PROVIDERS = {"deepseek": "DEEPSEEK_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+PROVIDERS = {"deepseek": "DEEPSEEK_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "azure": "AZURE_TRANSLATOR_KEY"}
+REGIONS = {"azure": "AZURE_TRANSLATOR_REGION"}  # not secret: the app keeps it in settings.json
 KEYS_FILE = models.APP_DIR / "keys.json"
 _ENTROPY = b"mitschrift-live/keys"
 
@@ -105,6 +106,12 @@ def _lookup(provider: str) -> tuple[str | None, str | None]:
 
 def get(provider: str) -> str | None:
     return _lookup(provider)[0]
+
+
+def region(provider: str) -> str | None:
+    """A provider's region from the environment (process, then `setx`), if it needs one."""
+    env = REGIONS.get(provider)
+    return (os.environ.get(env) or user_env(env)) if env else None
 
 
 def status() -> dict[str, dict]:

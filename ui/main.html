@@ -56,8 +56,8 @@
   .entry.me.cont .bubble { border-top-right-radius: 18px; border-bottom-right-radius: 6px; }
   .entry.live .bubble { border-style: dashed; }
   /* original first and larger; translation a bit smaller in a subtitle tint */
-  .orig { color: var(--text); font-size: 16.5px; line-height: 1.5; font-weight: 500; }
-  .trans { color: var(--trans); font-size: 15px; line-height: 1.5; font-weight: 500; margin-top: 3px; }
+  .orig { color: var(--text); font-size: 16px; line-height: 1.5; font-weight: 500; }
+  .trans { color: var(--trans); font-size: 16px; line-height: 1.5; font-weight: 500; margin-top: 3px; }
   mark { background: color-mix(in srgb, var(--warn) 45%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
   .empty { color: var(--text-3); text-align: center; margin-top: 18vh; line-height: 1.9; }
 
@@ -159,7 +159,7 @@
   <div class="toggle"><span data-i18n="zh">识别中文</span><button class="switch on" data-k="zh"></button></div>
   <h3 data-i18n="sec.mt">翻译</h3>
   <label class="field"><span data-i18n="model">模型</span>
-    <select id="set-model"><option value="deepseek-flash">deepseek-flash</option><option value="claude-haiku-5-5">Claude Haiku 5.5</option><option value="claude-opus-5-5">Claude Opus 5.5</option></select></label>
+    <select id="set-model"><option value="deepseek-flash">deepseek-flash</option><option value="claude-haiku-5-5">Claude Haiku 5.5</option><option value="claude-opus-5-5">Claude Opus 5.5</option><option value="azure-translator" data-i18n="model.azure">Microsoft Translator</option></select></label>
   <div class="keybox" data-provider="deepseek">
     <label class="field"><span data-i18n="key.deepseek">DeepSeek API key</span>
       <span class="keyrow"><input type="password" autocomplete="off" spellcheck="false" data-i18n-ph="key.ph"><button class="keysave" data-i18n="key.save">保存</button><button class="keyclear" hidden data-i18n="key.clear">删除</button></span></label>
@@ -170,13 +170,19 @@
       <span class="keyrow"><input type="password" autocomplete="off" spellcheck="false" data-i18n-ph="key.ph"><button class="keysave" data-i18n="key.save">保存</button><button class="keyclear" hidden data-i18n="key.clear">删除</button></span></label>
     <p class="hint keystatus"></p>
   </div>
+  <div class="keybox" data-provider="azure">
+    <label class="field"><span data-i18n="key.azure">Microsoft Translator key</span>
+      <span class="keyrow"><input type="password" autocomplete="off" spellcheck="false" data-i18n-ph="key.ph.azure"><button class="keysave" data-i18n="key.save">保存</button><button class="keyclear" hidden data-i18n="key.clear">删除</button></span></label>
+    <p class="hint keystatus"></p>
+    <label class="field"><span data-i18n="key.region">区域</span><input id="set-azure_region" spellcheck="false" data-i18n-ph="key.region.ph"></label>
+  </div>
   <label class="field"><span data-i18n="scene">场景</span><input id="set-scene" value="a German language class"></label>
   <p class="hint" data-i18n="scene.hint"></p>
   <h3 data-i18n="sec.bar">悬浮字幕</h3>
   <label class="field"><span data-i18n="bar.show">显示内容</span>
     <select id="set-bar-show"><option value="both" data-i18n="bar.show.both"></option><option value="original" data-i18n="bar.show.original"></option><option value="translation" data-i18n="bar.show.translation"></option></select></label>
   <p class="hint" data-i18n="bar.show.hint"></p>
-  <label class="field"><span data-i18n="bar.font">字号</span><input id="set-font" type="range" min="16" max="48" value="26"></label>
+  <label class="field"><span data-i18n="bar.font">字号</span><input id="set-font" type="range" min="12" max="40" value="20"></label>
   <label class="field"><span data-i18n="bar.text">文字不透明度</span><input id="set-text-alpha" type="range" min="20" max="100" value="100"></label>
   <label class="field"><span data-i18n="bar.bg">背景不透明度</span><input id="set-bg-alpha" type="range" min="0" max="100" value="100"></label>
   <p class="hint" data-i18n="bar.hint"></p>
