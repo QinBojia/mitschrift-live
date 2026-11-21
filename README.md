@@ -218,8 +218,10 @@ The engines work best with converted encoders, made once with the scripts in `be
 - **Click-through**: clicks go to the window below. Turn it off with **Ctrl+Alt+L**
   (falls back to Ctrl+Alt+C or Ctrl+Alt+F12 if taken; the settings show which).
 - **⚙ Settings**: interface language, devices (default: follow Windows), echo cancellation,
-  engine, Chinese detection, translation model, API keys and scene, caption bar font size and
-  text / background opacity.
+  engine, Chinese detection, translation model, API keys and scene, caption bar font size,
+  text / background opacity, and how bright unsettled text is in the bar (the last words of a
+  sentence being spoken, an original waiting for its translation, "Translating…"; all the way
+  up it looks like settled text).
 - **● Record**: both sides (MP3, ~30 MB per hour each) plus captions to `Documents\Mitschrift Live`,
   one folder per recording (named after its start time). A recording runs until you press
   ● Record again or quit: pausing, switching a side off and the automatic restarts (another

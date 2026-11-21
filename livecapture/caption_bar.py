@@ -146,16 +146,20 @@ SHOW_MODES = ("both", "original", "translation")  # what a caption shows; the ba
 # font: px (at 100 % display scaling) of every caption line. font_v 2: since 0.3.3 every line has
 # that size; before, "font" was the newest line's size and earlier lines got 0.78 of it - the size
 # the user chose to keep for all (an old setting is converted, see CaptionBar).
-DEFAULTS = {"font": 20, "text_alpha": 1.0, "bg_alpha": 1.0, "show": "both", "font_v": 2}
+# unsure: opacity of what may still change or stands in for what is coming - the last words
+# of a sentence being spoken (they can change at the next recognition), the original standing
+# in for its translation in "translation only", and "Translating..."; 1.0 = like settled text.
+DEFAULTS = {"font": 20, "text_alpha": 1.0, "bg_alpha": 1.0, "show": "both", "font_v": 2, "unsure": 0.55}
 FONT_RANGE = (12, 40)
 
 
-def entry_lines(e: dict, mode: str) -> tuple[list[tuple[str, float]], tuple[str, float] | None]:
+def entry_lines(e: dict, mode: str, unsure: float = DEFAULTS["unsure"]) -> tuple[list[tuple[str, float]], tuple[str, float] | None]:
     """What one caption shows in a display mode: the main line as (text, opacity) runs, and
-    the smaller translation line as (text, opacity), or None.
+    the translation line as (text, opacity), or None. Settled text has opacity 1, unsettled
+    text `unsure` (see DEFAULTS).
 
     "translation": the translation takes the place of the original. Until it is there the
-    original stands in, dimmed, so the bar is never empty while someone speaks; a finished
+    original stands in, at `unsure`, so the bar is never empty while someone speaks; a finished
     caption that gets no translation (translation off, no key, already in the target
     language) keeps its original at full strength.
     """
@@ -165,10 +169,10 @@ def entry_lines(e: dict, mode: str) -> tuple[list[tuple[str, float]], tuple[str,
     pending = tr_text == PENDING
     if mode == "translation" and tr_text and not pending:
         return [(tr_text, 1.0)], None
-    k = 0.6 if mode == "translation" and (pending or not e.get("final")) else 1.0
-    main = [(committed, k), (sep + tentative, 0.55 * k)]
+    stand_in = mode == "translation" and (pending or not e.get("final"))
+    main = [(committed, unsure if stand_in else 1.0), (sep + tentative, unsure)]
     if mode == "both" and tr_text:
-        return main, ((tr("bar.pending"), 0.6) if pending else (tr_text, 1.0))
+        return main, ((tr("bar.pending"), unsure) if pending else (tr_text, 1.0))
     return main, None
 
 
@@ -259,7 +263,7 @@ def layout(w: int, h: int, scale: float, entries: list[dict], prefs: dict) -> li
     y = h - pad_b
     for i in range(len(entries) - 1, -1, -1):
         e = entries[i]
-        main, line = entry_lines(e, prefs["show"])
+        main, line = entry_lines(e, prefs["show"], prefs.get("unsure", DEFAULTS["unsure"]))
         # "translation only" with the translation there: the main line is the translation
         fm = regular if prefs["show"] == "translation" and e.get("translation") not in (None, "", PENDING) else bold
         lines = [(fm, ln) for ln in _wrap([(s, WHITE, a) for s, a in main], fm, width)]
@@ -461,7 +465,7 @@ class CaptionBar:
     def set_pref(self, key: str, value) -> None:
         if key == "font":
             value = max(FONT_RANGE[0], min(FONT_RANGE[1], int(value)))
-        elif key == "text_alpha":
+        elif key in ("text_alpha", "unsure"):
             value = max(0.2, min(1.0, float(value)))
         elif key == "bg_alpha":
             value = max(0.0, min(1.0, float(value)))

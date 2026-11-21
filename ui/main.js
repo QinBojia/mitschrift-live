@@ -265,6 +265,7 @@ for (const [id, key] of [["set-engine", "engine"], ["set-model", "model"], ["set
 $("set-font").oninput = (ev) => api()?.set_bar_pref?.("font", Number(ev.target.value));
 $("set-text-alpha").oninput = (ev) => api()?.set_bar_pref?.("text_alpha", Number(ev.target.value) / 100);
 $("set-bg-alpha").oninput = (ev) => api()?.set_bar_pref?.("bg_alpha", Number(ev.target.value) / 100);
+$("set-unsure").oninput = (ev) => api()?.set_bar_pref?.("unsure", Number(ev.target.value) / 100);
 $("set-bar-show").onchange = (ev) => api()?.set_bar_pref?.("show", ev.target.value);
 // desktop shell -> page: the bar's look changed (A−/A+ on the bar itself) or on load
 window.__setBarPrefs = (p) => {
@@ -272,6 +273,7 @@ window.__setBarPrefs = (p) => {
   set("set-font", p.font);
   set("set-text-alpha", Math.round(p.text_alpha * 100));
   set("set-bg-alpha", Math.round(p.bg_alpha * 100));
+  set("set-unsure", Math.round((p.unsure ?? 0.55) * 100));
   set("set-bar-show", p.show ?? "both");
 };
 let hotkey = null;  // the global hotkey the desktop shell managed to register

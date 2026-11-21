@@ -115,3 +115,17 @@ def test_an_empty_bar_says_it_is_waiting_and_frames_have_the_window_size():
     for hover in (False, True):
         data, rects = render(800, 300, 1.5, _history(12), {**DEFAULTS, "bg_alpha": 0.3}, hover=hover, hot=None, locked=False)
         assert len(data) == 800 * 300 * 4 and bool(rects) == hover
+
+
+def test_one_setting_for_everything_unsettled():
+    for mode in SHOW_MODES:
+        for e in (SPEAKING, WAITING, DONE, PLAIN):
+            main, line = entry_lines(e, mode, unsure=1.0)  # all the way right: like settled text
+            assert all(a == 1.0 for _, a in main) and (line is None or line[1] == 1.0)
+    main, line = entry_lines(WAITING, "both", unsure=0.3)
+    assert main[0][1] == 1.0 and line[1] == 0.3  # the "translating" note
+    assert [a for _, a in entry_lines(SPEAKING, "both", unsure=0.3)[0]] == [1.0, 0.3]  # the words that may change
+    assert all(a == 0.3 for _, a in entry_lines(SPEAKING, "translation", unsure=0.3)[0])  # the stand-in original
+    bar = CaptionBar({}, None, lambda *a: None, lambda *a: None)
+    bar.set_pref("unsure", 5)
+    assert bar.prefs["unsure"] == 1.0 and DEFAULTS["unsure"] == 0.55
