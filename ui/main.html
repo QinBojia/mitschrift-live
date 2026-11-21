@@ -153,6 +153,10 @@
   <label class="field"><span data-i18n="dev.other">对方（系统声音）</span><select id="set-speaker"></select></label>
   <label class="field"><span data-i18n="dev.me">我（麦克风）</span><select id="set-mic"></select></label>
   <div class="toggle"><span data-i18n="aec">回声消除</span><button class="switch on" data-k="aec"></button></div>
+  <h3 data-i18n="sec.rec">录音</h3>
+  <label class="field"><span data-i18n="rec.dir">保存位置</span>
+    <span class="keyrow"><input id="rec-dir" readonly spellcheck="false"><button id="rec-dir-pick" data-i18n="rec.dir.pick">选择…</button><button id="rec-dir-reset" hidden data-i18n="rec.dir.reset">恢复默认</button></span></label>
+  <p class="hint" data-i18n="rec.dir.hint"></p>
   <h3 data-i18n="sec.asr">识别</h3>
   <label class="field"><span data-i18n="engine">引擎</span>
     <select id="set-engine"><option value="cuda" data-i18n="engine.cuda"></option><option value="npu" data-i18n="engine.npu"></option><option value="dml" data-i18n="engine.dml"></option><option value="cpu" data-i18n="engine.cpu"></option></select></label>

@@ -222,7 +222,8 @@ The engines work best with converted encoders, made once with the scripts in `be
   text / background opacity, and how bright unsettled text is in the bar (the last words of a
   sentence being spoken, an original waiting for its translation, "Translating…"; all the way
   up it looks like settled text).
-- **● Record**: both sides (MP3, ~30 MB per hour each) plus captions to `Documents\Mitschrift Live`,
+- **● Record**: both sides (MP3, ~30 MB per hour each) plus captions to `Documents\Mitschrift Live`
+  (or another folder: Settings -> Recording; a change applies from the next recording on),
   one folder per recording (named after its start time). A recording runs until you press
   ● Record again or quit: pausing, switching a side off and the automatic restarts (another
   default device, a changed engine) don't split it - the audio just has silence there. It

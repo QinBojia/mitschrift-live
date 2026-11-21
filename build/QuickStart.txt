@@ -26,7 +26,8 @@ Real-time captions and translation: what your computer plays ("Them") and your m
    - Settings -> Caption bar: text and background opacity separately.
    - Closing the window keeps the app in the tray (bottom right); quit from the tray menu.
    - Record saves both sides and the captions (also those from before you pressed it) to
-     Documents\Mitschrift Live; Clear (bottom bar) empties the window and the caption bar.
+     Documents\Mitschrift Live (Settings -> Recording to change); Clear (bottom bar) empties the
+     window and the caption bar.
    - Speakers work (echo cancellation), headphones work best.
 
 4. Editions

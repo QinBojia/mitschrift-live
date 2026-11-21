@@ -108,13 +108,25 @@ class Api:
         return self._app.hotkey
 
     def open_recordings(self, path: str | None = None) -> None:
-        """Open a recording folder in Explorer (only inside the recordings directory)."""
-        root = RECORD_DIR.resolve()
+        """Open a recording folder in Explorer (only inside the recordings folder chosen in the
+        settings, or the default one, or the last recording - which may predate a change)."""
+        b = self._app.backend
+        root = (b.record_dir if b else RECORD_DIR).resolve()
+        allowed = {root, RECORD_DIR.resolve()}
+        if b and b.last_recording:
+            allowed.add(Path(b.last_recording).resolve())
         target = Path(path).resolve() if path else root
-        if target != root and root not in target.parents:
+        if not any(target == a or a in target.parents for a in allowed):
             target = root
         target.mkdir(parents=True, exist_ok=True)
         os.startfile(target)  # noqa: S606 - opens a folder we created, in Explorer
+
+    def pick_folder(self, start: str | None = None) -> str | None:
+        """A folder chosen in Windows' folder dialog (for the recordings folder), or None."""
+        result = self._app.main.create_file_dialog(webview.FileDialog.FOLDER, directory=start or "")
+        if not result:
+            return None
+        return result if isinstance(result, str) else result[0]
 
     def save_text(self, text: str, fmt: str) -> str | None:
         name = time.strftime(f"mitschrift-live-%Y%m%d-%H%M.{fmt}")

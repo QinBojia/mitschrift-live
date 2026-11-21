@@ -136,6 +136,11 @@ function renderStatus() {
     : s.record_on ? t("rec.armed") : t("rec");
   rec.disabled = !s.connected;
   $("openRec").hidden = !s.last_recording;
+  if (s.record_dir !== undefined) {
+    $("rec-dir").value = s.record_dir;
+    $("rec-dir").title = s.record_dir;
+    $("rec-dir-reset").hidden = s.record_dir_default !== false;
+  }
   $("stats").innerHTML = s.loading
     ? `<span>${escapeHtml(s.loading)}</span>`
     : s.error
@@ -227,6 +232,13 @@ store.addEventListener("levels", () => {
 $("run").onclick = () => send({ type: "control", action: store.status.running ? "stop" : "start" });
 $("rec").onclick = () => send({ type: "set", key: "record", value: !store.status.record_on });
 $("openRec").onclick = () => api()?.open_recordings?.(store.status.last_recording);
+// recordings folder: Windows' folder dialog in the desktop app (a typed path in a browser preview)
+$("rec-dir-pick").onclick = async () => {
+  const cur = store.status.record_dir ?? "";
+  const dir = api()?.pick_folder ? await api().pick_folder(cur) : prompt(t("rec.dir"), cur);
+  if (dir) send({ type: "set", key: "record_dir", value: dir });
+};
+$("rec-dir-reset").onclick = () => send({ type: "set", key: "record_dir", value: "" });
 $("target").onclick = (ev) => ev.target.dataset.v && send({ type: "set", key: "target", value: ev.target.dataset.v });
 // the two sides in the status bar are switches: system audio / microphone on or off, while running
 for (const k of ["other", "me"]) {

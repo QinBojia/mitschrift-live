@@ -83,7 +83,7 @@ class Backend:
         self.levels = {"other": -100.0, "me": -100.0}
         # recording: a per-launch toggle (never saved, so nothing is recorded by surprise)
         self.record_on = False
-        self.record_dir = DEFAULT_RECORD_DIR
+        self.record_dir = Path(self.settings.record_dir) if self.settings.record_dir else DEFAULT_RECORD_DIR
         self.recorder: Recorder | None = None
         self.last_recording: str | None = None
         self.history: list[dict] = []  # finished captions since launch / the last clear (see above)
@@ -418,6 +418,8 @@ class Backend:
             return
         if key == "sources":
             return self._set_sources(value)
+        if key == "record_dir":
+            return self._set_record_dir(value)
         if key not in {f.name for f in dataclasses.fields(Settings)}:
             return  # UI-only keys (overlay look etc.)
         setattr(s, key, value)
@@ -457,6 +459,22 @@ class Backend:
             raise
         finally:
             self._record_event("sources", value=list(s.sources))
+
+    def _set_record_dir(self, value) -> None:
+        """Where the next recording goes ("" = the default, Documents\\Mitschrift Live). The
+        folder must be creatable and writable - checked now, not when the recording starts. A
+        recording that is running stays where it is."""
+        path = Path(str(value)).expanduser() if value else DEFAULT_RECORD_DIR
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            probe = path / ".mitschrift-write-test"
+            probe.write_bytes(b"")
+            probe.unlink()
+        except OSError as e:
+            raise OSError(tr("error.record_dir", path=path, e=e.strerror or e)) from None
+        self.settings.record_dir = str(path) if value else ""
+        self.settings.save(self.settings_path)
+        self.record_dir = path
 
     def _check_replay_done(self) -> None:
         p = self.pipeline
@@ -501,6 +519,7 @@ class Backend:
             "record_on": self.record_on, "recording": self.recorder is not None,
             "record_secs": round(time.time() - self.recorder.started) if self.recorder else 0,
             "last_recording": self.last_recording,
+            "record_dir": str(self.record_dir), "record_dir_default": not s.record_dir,
             "notice": self.notice if time.time() < self._notice_until else None,
             "keys": self._key_status,
         }

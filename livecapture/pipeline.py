@@ -40,6 +40,7 @@ class Settings:
     model: str = "deepseek-flash"
     scene: str = DEFAULT_SCENE
     azure_region: str = ""  # Microsoft Translator: the resource's region ("" = global / AZURE_TRANSLATOR_REGION)
+    record_dir: str = ""  # where ● Record saves ("" = Documents\Mitschrift Live)
     aec: bool = True
     echo_filter: bool = True
     zh: bool = True  # Chinese detection / SenseVoice
