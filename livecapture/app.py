@@ -24,7 +24,7 @@ import time
 from ctypes import wintypes
 from pathlib import Path
 
-from . import APP_NAME, APP_NAME_ZH, __version__, logs, models
+from . import APP_NAME, APP_NAME_ZH, __version__, logs, models, screen
 from .edition import EDITION
 
 # before the heavy imports below: under pythonw.exe there is no console to write to
@@ -153,7 +153,11 @@ class DesktopApp:
         else:
             query = "?demo&app=1"
         api = Api(self)
-        m = self.state.get("main", {})
+        # a position saved off every screen (a minimized window, an unplugged monitor) is dropped
+        saved = self.state.get("main", {})
+        m = self.state["main"] = screen.restorable(saved)
+        if m != saved:
+            save_state(self.state)
         self.main = webview.create_window(
             f"{APP_NAME_ZH} {APP_NAME}", f"{base}/main.html{query}", js_api=api,
             width=m.get("w", 1060), height=m.get("h", 820), x=m.get("x"), y=m.get("y"),
@@ -167,8 +171,9 @@ class DesktopApp:
         self.click_through = False
         self.hotkey: str | None = None
         self._demo_stop = threading.Event()
-        self.main.events.moved += lambda x, y: self._remember("main", x=x, y=y)
-        self.main.events.resized += lambda w, h: self._remember("main", w=w, h=h)
+        # not while minimized: Windows parks a minimized window at -32000 and reports a tiny size
+        self.main.events.moved += lambda x, y: screen.keep_position(x, y) and self._remember("main", x=x, y=y)
+        self.main.events.resized += lambda w, h: screen.keep_size(w, h) and self._remember("main", w=w, h=h)
         self.main.events.closing += self._on_main_closing
         self.main.events.closed += self._on_main_closed
         self._quitting = False

@@ -204,8 +204,11 @@
   The page scripts did not load: browsers block them for HTML files opened directly. Start the app with <b>ui.bat</b>.
 </div>
 <script>
-  // module scripts are blocked on file:// - say so instead of leaving dead buttons
-  setTimeout(() => { if (!window.__lcReady) document.getElementById("boot").hidden = false; }, 1500);
+  // module scripts are blocked on file:// - say so instead of leaving dead buttons. Served by the
+  // app the scripts can take several seconds while the same process loads the speech models, so
+  // there the note waits much longer, and main.js hides it again once it runs.
+  if (location.protocol === "file:") document.getElementById("boot").hidden = false;
+  else setTimeout(() => { if (!window.__lcReady) document.getElementById("boot").hidden = false; }, 15000);
 </script>
 <script type="module" src="main.js"></script>
 </body>

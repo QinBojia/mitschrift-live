@@ -326,3 +326,4 @@ function exportAs(fmt) {
 for (const b of document.querySelectorAll("[data-export]")) b.onclick = () => exportAs(b.dataset.export);
 
 window.__lcReady = true;
+$("boot").hidden = true;  // the "scripts did not load" note, should a slow start have shown it already
