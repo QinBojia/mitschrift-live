@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import models
+from . import appaudio, models
 from .audio import AudioSystem, FileSource, LiveSource
 from .edition import EDITION
 from .echo import EchoCanceller, EchoFilter
@@ -44,7 +44,7 @@ class Settings:
     aec: bool = True
     echo_filter: bool = True
     zh: bool = True  # Chinese detection / SenseVoice
-    speaker: str = ""  # loopback device name ("" = Windows default output)
+    speaker: str = ""  # loopback device name ("" = Windows default output), or "app:<exe>" for one app
     mic: str = ""  # microphone name ("" = Windows default input)
     sources: list[str] = field(default_factory=lambda: ["other", "me"])
     min_silence: float = 0.5
@@ -190,7 +190,11 @@ class Pipeline:
         for k, kind, device in (("other", "loopback", s.speaker), ("me", "mic", s.mic)):
             if need[k] and k not in self.sources:
                 try:
-                    src = LiveSource(self._system, kind, device or None)
+                    exe = appaudio.app_exe(device) if k == "other" else None
+                    if exe:  # one app's sound (and the echo canceller's reference is that app's too)
+                        src = appaudio.AppSource(exe, waiting_label=lambda n: tr("app.waiting", name=n))
+                    else:
+                        src = LiveSource(self._system, kind, device or None)
                     src.start(self._feeds[k])
                     self.sources[k] = src
                 except Exception as e:  # noqa: BLE001 - e.g. no microphone: the other side still runs

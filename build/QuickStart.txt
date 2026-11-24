@@ -28,6 +28,9 @@ Real-time captions and translation: what your computer plays ("Them") and your m
    - Record saves both sides and the captions (also those from before you pressed it) to
      Documents\Mitschrift Live (Settings -> Recording to change); Clear (bottom bar) empties the
      window and the caption bar.
+   - Settings -> Audio -> Them: an output device, or only one app's sound (e.g. just Zoom), so
+     music and notifications stay out of the captions. Muting that app in the Windows volume
+     mixer also mutes its captions.
    - Speakers work (echo cancellation), headphones work best.
 
 4. Editions

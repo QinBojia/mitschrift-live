@@ -4,6 +4,7 @@ import { t, setLang, applyI18n } from "./i18n.js";
 applyI18n();  // first guess: the WebView's language; the backend's setting follows in the first status
 
 const store = new Store();
+let filledFor = null;  // the saved speaker + mic the device lists were made for (fillDevices)
 const send = connect(store);
 const $ = (id) => document.getElementById(id);
 const list = $("list");
@@ -186,21 +187,52 @@ function applySettings(cfg) {
   setVal("set-model", cfg.model);
   setVal("set-scene", cfg.scene);
   setVal("set-azure_region", cfg.azure_region ?? "");
-  setVal("set-speaker", cfg.speaker ?? "");
-  setVal("set-mic", cfg.mic ?? "");
+  // a saved device or app missing from the list (an app that isn't running): list it first
+  const missing = (id, v) => v && ![...$(id).options].some((o) => o.value === v);
+  if (missing("set-speaker", cfg.speaker) || missing("set-mic", cfg.mic) ||
+      filledFor !== `${cfg.speaker ?? ""}\n${cfg.mic ?? ""}`) fillDevices();  // (drops a stale "not running")
+  else {
+    setVal("set-speaker", cfg.speaker ?? "");
+    setVal("set-mic", cfg.mic ?? "");
+  }
   setVal("set-ui_lang", cfg.ui_lang ?? "auto");
   for (const k of ["aec", "zh"]) document.querySelector(`.switch[data-k="${k}"]`)?.classList.toggle("on", !!cfg[k]);
 }
 
+// "对方": the default output, an output device, or one app ("app:<exe>"); the app list follows
+// what is running, so it is refilled now and then - but not while its dropdown is open
 function fillDevices() {
-  const fill = (id, names, label) => {
+  const cfg = store.status.settings ?? {};
+  filledFor = `${cfg.speaker ?? ""}\n${cfg.mic ?? ""}`;
+  const option = (value, label) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
+  // a saved device that isn't there now still shows as chosen (it is used again once it is back)
+  const withSaved = (names, saved) => (saved && !saved.startsWith("app:") && !names.includes(saved) ? [saved, ...names] : names);
+  const fill = (id, html) => {
     const el = $(id);
-    el.innerHTML = `<option value="">${escapeHtml(label)}</option>` +
-      names.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+    if (document.activeElement === el) { el.dataset.stale = "1"; return; }
+    el.innerHTML = html;
+    el.value = (id === "set-speaker" ? cfg.speaker : cfg.mic) ?? "";
   };
-  fill("set-speaker", store.devices.speakers ?? [], t("dev.default_out"));
-  fill("set-mic", store.devices.mics ?? [], t("dev.default_in"));
-  if (store.status.settings) applySettings(store.status.settings);
+  const speakers = withSaved(store.devices.speakers ?? [], cfg.speaker).map((n) => option(n, n)).join("");
+  let html = option("", t("dev.default_out"));
+  const apps = store.devices.apps;
+  if (apps) {  // null: this Windows can't capture a single app
+    const saved = cfg.speaker?.startsWith("app:") ? cfg.speaker : null;
+    const list = apps.map((a) => option(`app:${a.exe}`, a.name));
+    if (saved && !apps.some((a) => `app:${a.exe}` === saved)) {
+      list.unshift(option(saved, t("dev.app_off", { name: saved.slice(4).replace(/\.exe$/i, "") })));
+    }
+    html += `<optgroup label="${escapeHtml(t("dev.outputs"))}">${speakers}</optgroup>`;
+    if (list.length) html += `<optgroup label="${escapeHtml(t("dev.apps"))}">${list.join("")}</optgroup>`;
+  } else {
+    html += speakers;
+  }
+  fill("set-speaker", html);
+  fill("set-mic", option("", t("dev.default_in")) +
+    withSaved(store.devices.mics ?? [], cfg.mic).map((n) => option(n, n)).join(""));
+}
+for (const id of ["set-speaker", "set-mic"]) {
+  $(id).addEventListener("blur", () => { if ($(id).dataset.stale) { delete $(id).dataset.stale; fillDevices(); } });
 }
 store.addEventListener("devices", fillDevices);
 fillDevices();

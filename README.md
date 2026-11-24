@@ -45,7 +45,9 @@ translation, see below). Without a key you still get captions.
 
 - **Two sources, kept apart.** System audio via WASAPI loopback ("Them") and your
   microphone ("Me"). Either one can be switched off and on while capturing: no microphone
-  while you watch a video, or the microphone alone for a lecture in the room.
+  while you watch a video, or the microphone alone for a lecture in the room. "Them" can
+  also be one app instead of a whole output device (Zoom, Teams, a browser...): other
+  sounds - music, notifications - stay out of the captions.
 - **Local speech recognition.** NVIDIA Parakeet TDT 0.6B v3 (German, English and 23 more
   European languages) on an NVIDIA GPU, an Intel NPU, AMD / Intel integrated graphics
   (DirectML) or the CPU. Chinese is detected per utterance and transcribed by SenseVoice Small.
@@ -207,6 +209,12 @@ The engines work best with converted encoders, made once with the scripts in `be
   shown or recorded, and comes back at once when switched on again. With only the
   microphone on, its captions are labelled *Room*. (With echo cancellation on, system
   audio is still picked up as the reference for the microphone, but not transcribed.)
+- **Settings -> Audio -> Them**: the Windows default output, another output device, or *only
+  one app's sound*. The app list shows the apps that have played sound since they started;
+  an app chosen there is picked up when it starts and followed until it quits (Windows'
+  process loopback, Windows 10 2004 or later). It is what the app plays after its volume in
+  the Windows volume mixer: muting the app there also mutes its captions. With one app
+  chosen, the echo canceller only knows that app's sound.
 - **Caption bar**: show / hide it. Drag it by its body, resize it at its edges; its buttons
   (A− A+, what to show, click-through, ×) appear on hover. The newest caption is at the
   bottom and earlier ones fill the space above it: drag the bar taller to keep more of
@@ -251,6 +259,7 @@ livecapture/      the app
   server.py         backend: settings, model loading, WebSocket, status / speed log
   pipeline.py       audio sources -> segmenter -> translator, restartable
   audio.py, vad.py  WASAPI capture (loopback + mic), Silero VAD
+  appaudio.py       one app's sound (process loopback), the list of apps that use sound
   segmenter.py      utterances, partial results, forced cuts, sentence splits, language routing
   stt.py            Parakeet on cuda / npu / dml / cpu
   sensevoice.py     Chinese recognition + language ID

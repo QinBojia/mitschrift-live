@@ -7,7 +7,7 @@
 //   {type:"status", connected, running, loading, engine, device, model, target, scene,
 //        settings:{...}, sources:{other,me}, asr_ms, mt_ms, error, lag}
 //   {type:"levels", other, me}            (dBFS, ~10 Hz)
-//   {type:"devices", speakers:[name], mics:[name]}
+//   {type:"devices", speakers:[name], mics:[name], apps:[{exe, name}] | null}  (apps: for "app:<exe>" as speaker)
 //   {type:"clear"}                         (the captions so far were cleared)
 // The page URL carries ?port=&token= from the desktop shell (livecapture/server.py).
 // Client -> server:
@@ -106,6 +106,10 @@ function runDemo(store) {
     target: "zh", scene: "a German language class", asr_ms: 152, mt_ms: 731, error: null,
     sources: { other: "Speakers (Realtek Audio)", me: "Microphone (USB Audio)" },
   });
+  store.apply({ type: "devices", speakers: ["Speakers (Realtek Audio)", "Headphones (USB Audio)"],
+    mics: ["Microphone (USB Audio)"],
+    apps: [{ exe: "chrome.exe", name: "Google Chrome" }, { exe: "ms-teams.exe", name: "Microsoft Teams" },
+           { exe: "Zoom.exe", name: "Zoom Workplace" }] });
   let speaking = null;
   setInterval(() => {
     const lv = (s) => (speaking === s ? -30 + Math.random() * 18 : -62 + Math.random() * 6);

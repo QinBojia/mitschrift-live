@@ -29,7 +29,7 @@ from pathlib import Path
 
 from websockets.asyncio.server import ServerConnection, serve
 
-from . import __version__, i18n, keys, models
+from . import __version__, appaudio, i18n, keys, models
 from .i18n import tr
 from .audio import AudioSystem
 from .edition import EDITION
@@ -88,6 +88,7 @@ class Backend:
         self.last_recording: str | None = None
         self.history: list[dict] = []  # finished captions since launch / the last clear (see above)
         self._hist_lock = threading.Lock()  # history + recorder: no caption lost or doubled at ● Record
+        self._apps: list[dict] = []  # apps with an audio session (appaudio.list_apps), from the device watch
         self.notice: str | None = None  # short info line for the UI (e.g. device switched)
         self._notice_until = 0.0
         self._clients: set[ServerConnection] = set()
@@ -122,7 +123,8 @@ class Backend:
     # ---- follow the Windows default devices ------------------------------------------
     def _watch_default_devices(self) -> None:
         """Every 2 s: if the Windows default output/input changed (headphones plugged in,
-        a USB mic, ...), restart capture on the new device for streams set to "default"."""
+        a USB mic, ...), restart capture on the new device for streams set to "default".
+        Also keeps the list of apps that use sound (for "Them") current in the dropdown."""
         try:
             import comtypes
             from pycaw.constants import EDataFlow, ERole
@@ -132,7 +134,17 @@ class Backend:
         except Exception:  # noqa: BLE001 - no pycaw: just don't follow
             return
         last = None
-        while not self._stopping.wait(2.0):
+        while True:
+            if appaudio.supported():
+                try:
+                    apps = appaudio.list_apps()
+                except Exception:  # noqa: BLE001 - keep the last list
+                    apps = self._apps
+                if apps != self._apps:
+                    self._apps = apps
+                    self._ctl.submit(self._send_devices)
+            if self._stopping.wait(2.0):
+                return
             try:
                 e = AudioUtilities.GetDeviceEnumerator()
                 names = tuple(
@@ -487,7 +499,9 @@ class Backend:
             try:
                 msg = {"type": "devices",
                        "speakers": [d["name"] for d in system.loopback_devices()],
-                       "mics": [d["name"] for d in system.input_devices()]}
+                       "mics": [d["name"] for d in system.input_devices()],
+                       # apps that use sound, for capturing just one (None: this Windows can't)
+                       "apps": self._apps if appaudio.supported() else None}
             finally:
                 system.close()
             self.broadcast(msg)
